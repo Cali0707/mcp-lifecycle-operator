@@ -1,3 +1,5 @@
+<!-- Generated from kubebuilder template: https://github.com/kubernetes-sigs/kubebuilder/blob/v4.11.1/pkg/plugins/golang/v4/scaffolds/internal/templates/agents.go -->
+
 # mcp-lifecycle-operator - AI Agent Guide
 
 ## Project Structure
