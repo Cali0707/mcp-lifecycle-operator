@@ -87,6 +87,18 @@ type MCPServerSpec struct {
 	// and bind it to the 'view' ClusterRole.
 	// +optional
 	ServiceAccountName string `json:"serviceAccountName,omitempty"`
+
+	// Env is a list of environment variables to set in the MCP server container.
+	// Supports the full Kubernetes EnvVar API including valueFrom for secrets and configmaps.
+	// +optional
+	Env []corev1.EnvVar `json:"env,omitempty"`
+
+	// EnvFrom is a list of sources to populate environment variables in the MCP server container.
+	// Each entry injects all key-value pairs from a Secret or ConfigMap as environment variables.
+	// The keys become the variable names. Useful when a Secret's keys already match
+	// the expected env var names (e.g., GITHUB_TOKEN).
+	// +optional
+	EnvFrom []corev1.EnvFromSource `json:"envFrom,omitempty"`
 }
 
 // MCPServerStatus defines the observed state of MCPServer.

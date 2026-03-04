@@ -21,6 +21,7 @@ package controller
 
 import (
 	"context"
+	"reflect"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -104,7 +105,18 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		log.Error(err, "Failed to get Deployment")
 		return ctrl.Result{}, err
 	} else {
-		log.Info("Deployment already exists", "name", deployment.Name)
+		needsUpdate := !reflect.DeepEqual(existingDeployment.Spec.Template.Spec.Containers, deployment.Spec.Template.Spec.Containers) ||
+			!reflect.DeepEqual(existingDeployment.Spec.Template.Spec.Volumes, deployment.Spec.Template.Spec.Volumes) ||
+			existingDeployment.Spec.Template.Spec.ServiceAccountName != deployment.Spec.Template.Spec.ServiceAccountName
+		if needsUpdate {
+			log.Info("Updating Deployment", "name", deployment.Name)
+			if err := r.Update(ctx, deployment); err != nil {
+				log.Error(err, "Failed to update Deployment")
+				return ctrl.Result{}, err
+			}
+		} else {
+			log.Info("Deployment already exists and is up to date", "name", deployment.Name)
+		}
 	}
 
 	// Create or update Service
@@ -162,16 +174,16 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	// Set phase and conditions based on Deployment status
-if len(existingDeployment.Status.Conditions) == 0 && existingDeployment.Status.ReadyReplicas == 0 {
-    mcpServer.Status.Phase = "Pending"
-    meta.SetStatusCondition(&mcpServer.Status.Conditions, metav1.Condition{
-        Type:    "Ready",
-        Status:  metav1.ConditionFalse,
-        Reason:  "DeploymentPending",
-        Message: "Waiting for Deployment to report status",
-        ObservedGeneration: mcpServer.Generation,
-    })
-} else if deploymentAvailable && existingDeployment.Status.ReadyReplicas > 0 {
+	if len(existingDeployment.Status.Conditions) == 0 && existingDeployment.Status.ReadyReplicas == 0 {
+		mcpServer.Status.Phase = "Pending"
+		meta.SetStatusCondition(&mcpServer.Status.Conditions, metav1.Condition{
+			Type:               "Ready",
+			Status:             metav1.ConditionFalse,
+			Reason:             "DeploymentPending",
+			Message:            "Waiting for Deployment to report status",
+			ObservedGeneration: mcpServer.Generation,
+		})
+	} else if deploymentAvailable && existingDeployment.Status.ReadyReplicas > 0 {
 		mcpServer.Status.Phase = "Running"
 		meta.SetStatusCondition(&mcpServer.Status.Conditions, metav1.Condition{
 			Type:               "Ready",
@@ -237,6 +249,14 @@ func (r *MCPServerReconciler) createDeployment(mcpServer *mcpv1alpha1.MCPServer)
 	// Add args if specified
 	if len(mcpServer.Spec.Args) > 0 {
 		container.Args = mcpServer.Spec.Args
+	}
+
+	// Add env vars if specified
+	if len(mcpServer.Spec.Env) > 0 {
+		container.Env = mcpServer.Spec.Env
+	}
+	if len(mcpServer.Spec.EnvFrom) > 0 {
+		container.EnvFrom = mcpServer.Spec.EnvFrom
 	}
 
 	// Add volume mount if ConfigMapRef is specified
