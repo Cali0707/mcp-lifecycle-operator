@@ -249,7 +249,7 @@ func (r *MCPServerReconciler) reconcileDeployment(
 }
 
 // createDeployment creates a Deployment for the MCPServer
-func (r *MCPServerReconciler) createDeployment(mcpServer *mcpv1alpha1.MCPServer) *appsv1.Deployment {
+func (r *MCPServerReconciler) createDeployment(ctx context.Context, mcpServer *mcpv1alpha1.MCPServer) (*appsv1.Deployment, error) {
 	replicas := int32(1)
 	labels := map[string]string{
 		"app":        "mcp-server",
@@ -290,6 +290,11 @@ func (r *MCPServerReconciler) createDeployment(mcpServer *mcpv1alpha1.MCPServer)
 
 	// Add volume mount if SecretRef is specified
 	if mcpServer.Spec.SecretRef != nil {
+
+		if err := r.Get(ctx, client.ObjectKey{Name: mcpServer.Spec.SecretRef.Name, Namespace: mcpServer.Namespace}, &corev1.Secret{}); err != nil && apierrors.IsNotFound(err) {
+			return nil, err
+		}
+
 		volumeName := mcpServer.Spec.SecretVolumeName
 		if volumeName == "" {
 			volumeName = "mcp-secrets"
@@ -369,7 +374,7 @@ func (r *MCPServerReconciler) createDeployment(mcpServer *mcpv1alpha1.MCPServer)
 	// Add pod security context if specified
 	deployment.Spec.Template.Spec.SecurityContext = mcpServer.Spec.PodSecurityContext
 
-	return deployment
+	return deployment, nil
 }
 
 // reconcileService creates the Service for the MCPServer if it doesn't exist.
