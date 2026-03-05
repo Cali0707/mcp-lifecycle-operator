@@ -108,8 +108,8 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		oldPodSpec := existingDeployment.Spec.Template.Spec
 		newPodSpec := deployment.Spec.Template.Spec
 		needsUpdate := !equality.Semantic.DeepDerivative(newPodSpec, oldPodSpec) ||
-			!equality.Semantic.DeepDerivative(oldPodSpec.Containers[0].Env, newPodSpec.Containers[0].Env) ||
-			!equality.Semantic.DeepDerivative(oldPodSpec.Containers[0].EnvFrom, newPodSpec.Containers[0].EnvFrom)
+			!equality.Semantic.DeepEqual(oldPodSpec.Containers[0].Env, newPodSpec.Containers[0].Env) ||
+			!equality.Semantic.DeepEqual(oldPodSpec.Containers[0].EnvFrom, newPodSpec.Containers[0].EnvFrom)
 		if needsUpdate {
 			log.Info("Updating Deployment", "name", existingDeployment.Name)
 			existingDeployment.Spec.Template.Spec = deployment.Spec.Template.Spec
