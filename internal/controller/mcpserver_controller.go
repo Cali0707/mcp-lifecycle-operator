@@ -230,7 +230,9 @@ func (r *MCPServerReconciler) reconcileDeployment(
 	newPodSpec := deployment.Spec.Template.Spec
 	needsUpdate := !equality.Semantic.DeepDerivative(newPodSpec, oldPodSpec) ||
 		!equality.Semantic.DeepEqual(oldPodSpec.Containers[0].Env, newPodSpec.Containers[0].Env) ||
-		!equality.Semantic.DeepEqual(oldPodSpec.Containers[0].EnvFrom, newPodSpec.Containers[0].EnvFrom)
+		!equality.Semantic.DeepEqual(oldPodSpec.Containers[0].EnvFrom, newPodSpec.Containers[0].EnvFrom) ||
+		!equality.Semantic.DeepEqual(oldPodSpec.Containers[0].SecurityContext, newPodSpec.Containers[0].SecurityContext) ||
+		!equality.Semantic.DeepEqual(oldPodSpec.SecurityContext, newPodSpec.SecurityContext)
 	if needsUpdate {
 		logger.Info("Updating Deployment", "name", existingDeployment.Name)
 		existingDeployment.Spec.Template.Spec = deployment.Spec.Template.Spec
@@ -276,6 +278,11 @@ func (r *MCPServerReconciler) createDeployment(mcpServer *mcpv1alpha1.MCPServer)
 	}
 	if len(mcpServer.Spec.EnvFrom) > 0 {
 		container.EnvFrom = mcpServer.Spec.EnvFrom
+	}
+
+	// Add security context if specified
+	if mcpServer.Spec.SecurityContext != nil {
+		container.SecurityContext = mcpServer.Spec.SecurityContext
 	}
 
 	// Add volume mount if ConfigMapRef is specified
@@ -332,6 +339,11 @@ func (r *MCPServerReconciler) createDeployment(mcpServer *mcpv1alpha1.MCPServer)
 				},
 			},
 		},
+	}
+
+	// Add pod security context if specified
+	if mcpServer.Spec.PodSecurityContext != nil {
+		deployment.Spec.Template.Spec.SecurityContext = mcpServer.Spec.PodSecurityContext
 	}
 
 	return deployment

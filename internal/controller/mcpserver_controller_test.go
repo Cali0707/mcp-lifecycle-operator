@@ -194,6 +194,196 @@ var _ = Describe("MCPServer Controller", func() {
 		})
 	})
 
+	Context("When reconciling a resource with security context", func() {
+		const resourceName = "test-resource-secctx"
+
+		ctx := context.Background()
+
+		typeNamespacedName := types.NamespacedName{
+			Name:      resourceName,
+			Namespace: "default",
+		}
+
+		AfterEach(func() {
+			resource := &mcpv1alpha1.MCPServer{}
+			err := k8sClient.Get(ctx, typeNamespacedName, resource)
+			if err == nil {
+				Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
+			}
+		})
+
+		It("should propagate container security context to the deployment", func() {
+			runAsUser := int64(1001)
+			runAsGroup := int64(0)
+			resource := &mcpv1alpha1.MCPServer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      resourceName,
+					Namespace: "default",
+				},
+				Spec: mcpv1alpha1.MCPServerSpec{
+					Image: "test-image:latest",
+					Port:  8080,
+					SecurityContext: &corev1.SecurityContext{
+						RunAsUser:  &runAsUser,
+						RunAsGroup: &runAsGroup,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+
+			controllerReconciler := &MCPServerReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: typeNamespacedName,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			deployment := &appsv1.Deployment{}
+			err = k8sClient.Get(ctx, client.ObjectKey{
+				Name:      resourceName,
+				Namespace: "default",
+			}, deployment)
+			Expect(err).NotTo(HaveOccurred())
+
+			sc := deployment.Spec.Template.Spec.Containers[0].SecurityContext
+			Expect(sc).NotTo(BeNil())
+			Expect(*sc.RunAsUser).To(Equal(int64(1001)))
+			Expect(*sc.RunAsGroup).To(Equal(int64(0)))
+		})
+
+		It("should propagate pod security context to the deployment", func() {
+			runAsUser := int64(1001)
+			fsGroup := int64(1001)
+			resource := &mcpv1alpha1.MCPServer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      resourceName,
+					Namespace: "default",
+				},
+				Spec: mcpv1alpha1.MCPServerSpec{
+					Image: "test-image:latest",
+					Port:  8080,
+					PodSecurityContext: &corev1.PodSecurityContext{
+						RunAsUser: &runAsUser,
+						FSGroup:   &fsGroup,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+
+			controllerReconciler := &MCPServerReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: typeNamespacedName,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			deployment := &appsv1.Deployment{}
+			err = k8sClient.Get(ctx, client.ObjectKey{
+				Name:      resourceName,
+				Namespace: "default",
+			}, deployment)
+			Expect(err).NotTo(HaveOccurred())
+
+			podSC := deployment.Spec.Template.Spec.SecurityContext
+			Expect(podSC).NotTo(BeNil())
+			Expect(*podSC.RunAsUser).To(Equal(int64(1001)))
+			Expect(*podSC.FSGroup).To(Equal(int64(1001)))
+		})
+
+		It("should apply both pod and container security contexts together", func() {
+			runAsUser := int64(1001)
+			fsGroup := int64(1001)
+			readOnly := true
+			resource := &mcpv1alpha1.MCPServer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      resourceName,
+					Namespace: "default",
+				},
+				Spec: mcpv1alpha1.MCPServerSpec{
+					Image: "test-image:latest",
+					Port:  8080,
+					PodSecurityContext: &corev1.PodSecurityContext{
+						RunAsUser: &runAsUser,
+						FSGroup:   &fsGroup,
+					},
+					SecurityContext: &corev1.SecurityContext{
+						ReadOnlyRootFilesystem: &readOnly,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+
+			controllerReconciler := &MCPServerReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: typeNamespacedName,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			deployment := &appsv1.Deployment{}
+			err = k8sClient.Get(ctx, client.ObjectKey{
+				Name:      resourceName,
+				Namespace: "default",
+			}, deployment)
+			Expect(err).NotTo(HaveOccurred())
+
+			podSC := deployment.Spec.Template.Spec.SecurityContext
+			Expect(podSC).NotTo(BeNil())
+			Expect(*podSC.RunAsUser).To(Equal(int64(1001)))
+			Expect(*podSC.FSGroup).To(Equal(int64(1001)))
+
+			containerSC := deployment.Spec.Template.Spec.Containers[0].SecurityContext
+			Expect(containerSC).NotTo(BeNil())
+			Expect(*containerSC.ReadOnlyRootFilesystem).To(BeTrue())
+		})
+
+		It("should not set security contexts when not specified", func() {
+			resource := &mcpv1alpha1.MCPServer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      resourceName + "-none",
+					Namespace: "default",
+				},
+				Spec: mcpv1alpha1.MCPServerSpec{
+					Image: "test-image:latest",
+					Port:  8080,
+				},
+			}
+			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+
+			controllerReconciler := &MCPServerReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: resourceName + "-none", Namespace: "default"},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			deployment := &appsv1.Deployment{}
+			err = k8sClient.Get(ctx, client.ObjectKey{
+				Name:      resourceName + "-none",
+				Namespace: "default",
+			}, deployment)
+			Expect(err).NotTo(HaveOccurred())
+
+			podSC := deployment.Spec.Template.Spec.SecurityContext
+			if podSC != nil {
+				Expect(*podSC).To(Equal(corev1.PodSecurityContext{}))
+			}
+			Expect(deployment.Spec.Template.Spec.Containers[0].SecurityContext).To(BeNil())
+
+			mcpServer := &mcpv1alpha1.MCPServer{}
+			Expect(k8sClient.Get(ctx, client.ObjectKey{Name: resourceName + "-none", Namespace: "default"}, mcpServer)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, mcpServer)).To(Succeed())
+		})
+	})
+
 	Context("When reconciling a resource with envFrom", func() {
 		const resourceName = "test-resource-envfrom"
 

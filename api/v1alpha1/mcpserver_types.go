@@ -99,6 +99,14 @@ type MCPServerSpec struct {
 	// the expected env var names (e.g., GITHUB_TOKEN).
 	// +optional
 	EnvFrom []corev1.EnvFromSource `json:"envFrom,omitempty"`
+
+	// PodSecurityContext specifies the security context for the MCP server pod.
+	// +optional
+	PodSecurityContext *corev1.PodSecurityContext `json:"podSecurityContext,omitempty"`
+
+	// SecurityContext specifies the security context for the MCP server container.
+	// +optional
+	SecurityContext *corev1.SecurityContext `json:"securityContext,omitempty"`
 }
 
 // MCPServerStatus defines the observed state of MCPServer.
