@@ -310,3 +310,67 @@ var _ = Describe("Phase Constants", func() {
 		Expect(PhaseFailed).To(Equal("Failed"))
 	})
 })
+
+var _ = Describe("MCPServer Controller - reconcileDeployment", func() {
+	const resourceName = "test-reconcile-deployment"
+
+	ctx := context.Background()
+
+	typeNamespacedName := types.NamespacedName{
+		Name:      resourceName,
+		Namespace: "default",
+	}
+
+	BeforeEach(func() {
+		resource := &mcpv1alpha1.MCPServer{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      resourceName,
+				Namespace: "default",
+			},
+			Spec: mcpv1alpha1.MCPServerSpec{
+				Image: "test-image:latest",
+				Port:  8080,
+			},
+		}
+		Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+	})
+
+	AfterEach(func() {
+		resource := &mcpv1alpha1.MCPServer{}
+		err := k8sClient.Get(ctx, typeNamespacedName, resource)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
+	})
+
+	It("should create a deployment when none exists", func() {
+		mcpServer := &mcpv1alpha1.MCPServer{}
+		Expect(k8sClient.Get(ctx, typeNamespacedName, mcpServer)).To(Succeed())
+
+		reconciler := &MCPServerReconciler{
+			Client: k8sClient,
+			Scheme: k8sClient.Scheme(),
+		}
+
+		deployment, err := reconciler.reconcileDeployment(ctx, mcpServer)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(deployment).NotTo(BeNil())
+		Expect(deployment.Name).To(Equal(resourceName))
+	})
+
+	It("should return existing deployment without error on second call", func() {
+		mcpServer := &mcpv1alpha1.MCPServer{}
+		Expect(k8sClient.Get(ctx, typeNamespacedName, mcpServer)).To(Succeed())
+
+		reconciler := &MCPServerReconciler{
+			Client: k8sClient,
+			Scheme: k8sClient.Scheme(),
+		}
+
+		_, err := reconciler.reconcileDeployment(ctx, mcpServer)
+		Expect(err).NotTo(HaveOccurred())
+
+		deployment, err := reconciler.reconcileDeployment(ctx, mcpServer)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(deployment).NotTo(BeNil())
+	})
+})

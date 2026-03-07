@@ -87,46 +87,11 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 	}
 
-	// Create or update Deployment
-	deployment := r.createDeployment(mcpServer)
-	if err := controllerutil.SetControllerReference(mcpServer, deployment, r.Scheme); err != nil {
-		logger.Error(err, "Failed to set controller reference for Deployment")
+	// Reconcile Deployment
+	existingDeployment, err := r.reconcileDeployment(ctx, mcpServer)
+	if err != nil {
+		r.updateStatusFailed(ctx, mcpServer, "Failed to reconcile Deployment")
 		return ctrl.Result{}, err
-	}
-
-	existingDeployment := &appsv1.Deployment{}
-	err := r.Get(ctx, client.ObjectKey{Name: deployment.Name, Namespace: deployment.Namespace}, existingDeployment)
-	if err != nil && apierrors.IsNotFound(err) {
-		logger.Info("Creating Deployment", "name", deployment.Name)
-		if err := r.Create(ctx, deployment); err != nil {
-			logger.Error(err, "Failed to create Deployment")
-			r.updateStatusFailed(ctx, mcpServer, "Failed to create Deployment")
-			return ctrl.Result{}, err
-		}
-		// After creation, fetch it again to get the current status
-		if err := r.Get(ctx, client.ObjectKey{Name: deployment.Name, Namespace: deployment.Namespace}, existingDeployment); err != nil {
-			logger.Error(err, "Failed to get newly created Deployment")
-			return ctrl.Result{}, err
-		}
-	} else if err != nil {
-		logger.Error(err, "Failed to get Deployment")
-		return ctrl.Result{}, err
-	} else {
-		oldPodSpec := existingDeployment.Spec.Template.Spec
-		newPodSpec := deployment.Spec.Template.Spec
-		needsUpdate := !equality.Semantic.DeepDerivative(newPodSpec, oldPodSpec) ||
-			!equality.Semantic.DeepEqual(oldPodSpec.Containers[0].Env, newPodSpec.Containers[0].Env) ||
-			!equality.Semantic.DeepEqual(oldPodSpec.Containers[0].EnvFrom, newPodSpec.Containers[0].EnvFrom)
-		if needsUpdate {
-			logger.Info("Updating Deployment", "name", existingDeployment.Name)
-			existingDeployment.Spec.Template.Spec = deployment.Spec.Template.Spec
-			if err := r.Update(ctx, existingDeployment); err != nil {
-				logger.Error(err, "Failed to update Deployment")
-				return ctrl.Result{}, err
-			}
-		} else {
-			logger.Info("Deployment already exists and is up to date", "name", deployment.Name)
-		}
 	}
 
 	// Create or update Service
@@ -153,7 +118,7 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	// Update status based on Deployment status
-	mcpServer.Status.DeploymentName = deployment.Name
+	mcpServer.Status.DeploymentName = existingDeployment.Name
 	mcpServer.Status.ServiceName = service.Name
 
 	// Check Deployment status to determine MCPServer phase
@@ -234,6 +199,59 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	logger.Info("Successfully reconciled MCPServer", "phase", mcpServer.Status.Phase)
 	return ctrl.Result{}, nil
+}
+
+// reconcileDeployment creates or updates the Deployment for the MCPServer
+// and returns the current state of the deployment.
+func (r *MCPServerReconciler) reconcileDeployment(
+	ctx context.Context,
+	mcpServer *mcpv1alpha1.MCPServer,
+) (*appsv1.Deployment, error) {
+	logger := log.FromContext(ctx)
+
+	deployment := r.createDeployment(mcpServer)
+	if err := controllerutil.SetControllerReference(mcpServer, deployment, r.Scheme); err != nil {
+		logger.Error(err, "Failed to set controller reference for Deployment")
+		return nil, err
+	}
+
+	existingDeployment := &appsv1.Deployment{}
+	err := r.Get(ctx, client.ObjectKey{Name: deployment.Name, Namespace: deployment.Namespace}, existingDeployment)
+	if err != nil && apierrors.IsNotFound(err) {
+		logger.Info("Creating Deployment", "name", deployment.Name)
+		if err := r.Create(ctx, deployment); err != nil {
+			logger.Error(err, "Failed to create Deployment")
+			return nil, err
+		}
+		if err := r.Get(ctx, client.ObjectKey{
+			Name: deployment.Name, Namespace: deployment.Namespace,
+		}, existingDeployment); err != nil {
+			logger.Error(err, "Failed to get newly created Deployment")
+			return nil, err
+		}
+		return existingDeployment, nil
+	} else if err != nil {
+		logger.Error(err, "Failed to get Deployment")
+		return nil, err
+	}
+
+	oldPodSpec := existingDeployment.Spec.Template.Spec
+	newPodSpec := deployment.Spec.Template.Spec
+	needsUpdate := !equality.Semantic.DeepDerivative(newPodSpec, oldPodSpec) ||
+		!equality.Semantic.DeepEqual(oldPodSpec.Containers[0].Env, newPodSpec.Containers[0].Env) ||
+		!equality.Semantic.DeepEqual(oldPodSpec.Containers[0].EnvFrom, newPodSpec.Containers[0].EnvFrom)
+	if needsUpdate {
+		logger.Info("Updating Deployment", "name", existingDeployment.Name)
+		existingDeployment.Spec.Template.Spec = deployment.Spec.Template.Spec
+		if err := r.Update(ctx, existingDeployment); err != nil {
+			logger.Error(err, "Failed to update Deployment")
+			return nil, err
+		}
+	} else {
+		logger.Info("Deployment already exists and is up to date", "name", deployment.Name)
+	}
+
+	return existingDeployment, nil
 }
 
 // createDeployment creates a Deployment for the MCPServer
