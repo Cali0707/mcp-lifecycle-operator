@@ -236,12 +236,14 @@ func (r *MCPServerReconciler) reconcileDeployment(
 	oldPodSpec := existingDeployment.Spec.Template.Spec
 	newPodSpec := deployment.Spec.Template.Spec
 	needsUpdate := !equality.Semantic.DeepDerivative(newPodSpec, oldPodSpec) ||
+		!equality.Semantic.DeepEqual(oldPodSpec.Containers[0].Args, newPodSpec.Containers[0].Args) ||
 		!equality.Semantic.DeepEqual(oldPodSpec.Containers[0].Env, newPodSpec.Containers[0].Env) ||
 		!equality.Semantic.DeepEqual(oldPodSpec.Containers[0].EnvFrom, newPodSpec.Containers[0].EnvFrom) ||
 		!equality.Semantic.DeepEqual(oldPodSpec.Containers[0].SecurityContext, newPodSpec.Containers[0].SecurityContext) ||
 		!equality.Semantic.DeepEqual(oldPodSpec.SecurityContext, newPodSpec.SecurityContext) ||
 		!equality.Semantic.DeepEqual(oldPodSpec.Volumes, newPodSpec.Volumes) ||
-		!equality.Semantic.DeepEqual(oldPodSpec.Containers[0].VolumeMounts, newPodSpec.Containers[0].VolumeMounts)
+		!equality.Semantic.DeepEqual(oldPodSpec.Containers[0].VolumeMounts, newPodSpec.Containers[0].VolumeMounts) ||
+		oldPodSpec.ServiceAccountName != newPodSpec.ServiceAccountName
 	if needsUpdate {
 		logger.Info("Updating Deployment", "name", existingDeployment.Name)
 		existingDeployment.Spec.Template.Spec = deployment.Spec.Template.Spec
@@ -383,7 +385,7 @@ func (r *MCPServerReconciler) createDeployment(ctx context.Context, mcpServer *m
 					Labels: labels,
 				},
 				Spec: corev1.PodSpec{
-					ServiceAccountName: mcpServer.Spec.ServiceAccountName,
+					ServiceAccountName: serviceAccountName(mcpServer.Spec.ServiceAccountName),
 					Containers:         []corev1.Container{container},
 					Volumes:            volumes,
 				},
@@ -471,6 +473,14 @@ func (r *MCPServerReconciler) updateStatusFailed(ctx context.Context, mcpServer 
 		ObservedGeneration: mcpServer.Generation,
 	})
 	_ = r.Status().Update(ctx, mcpServer)
+}
+
+// serviceAccountName returns the given name, defaulting to "default" if empty.
+func serviceAccountName(name string) string {
+	if name == "" {
+		return "default"
+	}
+	return name
 }
 
 // SetupWithManager sets up the controller with the Manager.
