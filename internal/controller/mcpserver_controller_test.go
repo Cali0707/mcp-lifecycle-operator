@@ -487,7 +487,7 @@ var _ = Describe("MCPServer Controller", func() {
 			Expect(*containerSC.ReadOnlyRootFilesystem).To(BeTrue())
 		})
 
-		It("should not set security contexts when not specified", func() {
+		It("should apply default restricted security contexts when not specified", func() {
 			resource := &mcpv1alpha1.MCPServer{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      resourceName + "-none",
@@ -516,11 +516,22 @@ var _ = Describe("MCPServer Controller", func() {
 			}, deployment)
 			Expect(err).NotTo(HaveOccurred())
 
+			By("Verifying no pod security context is set by default")
 			podSC := deployment.Spec.Template.Spec.SecurityContext
 			if podSC != nil {
 				Expect(*podSC).To(Equal(corev1.PodSecurityContext{}))
 			}
-			Expect(deployment.Spec.Template.Spec.Containers[0].SecurityContext).To(BeNil())
+
+			By("Verifying default container security context")
+			containerSC := deployment.Spec.Template.Spec.Containers[0].SecurityContext
+			Expect(containerSC).NotTo(BeNil())
+			Expect(*containerSC.AllowPrivilegeEscalation).To(BeFalse())
+			Expect(*containerSC.ReadOnlyRootFilesystem).To(BeTrue())
+			Expect(*containerSC.RunAsNonRoot).To(BeTrue())
+			Expect(containerSC.Capabilities).NotTo(BeNil())
+			Expect(containerSC.Capabilities.Drop).To(ContainElement(corev1.Capability("ALL")))
+			Expect(containerSC.SeccompProfile).NotTo(BeNil())
+			Expect(containerSC.SeccompProfile.Type).To(Equal(corev1.SeccompProfileTypeRuntimeDefault))
 
 			mcpServer := &mcpv1alpha1.MCPServer{}
 			Expect(k8sClient.Get(ctx, client.ObjectKey{Name: resourceName + "-none", Namespace: "default"}, mcpServer)).To(Succeed())

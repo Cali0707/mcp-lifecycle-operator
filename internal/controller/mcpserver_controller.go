@@ -31,6 +31,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -291,8 +292,12 @@ func (r *MCPServerReconciler) createDeployment(ctx context.Context, mcpServer *m
 		container.EnvFrom = mcpServer.Spec.EnvFrom
 	}
 
-	// Add security context if specified
-	container.SecurityContext = mcpServer.Spec.SecurityContext
+	// Apply security context: use user-specified if provided, otherwise apply restricted defaults
+	if mcpServer.Spec.SecurityContext != nil {
+		container.SecurityContext = mcpServer.Spec.SecurityContext
+	} else {
+		container.SecurityContext = defaultContainerSecurityContext()
+	}
 
 	// Add volume mount if ConfigMapRef is specified
 	var volumes []corev1.Volume
@@ -393,8 +398,10 @@ func (r *MCPServerReconciler) createDeployment(ctx context.Context, mcpServer *m
 		},
 	}
 
-	// Add pod security context if specified
-	deployment.Spec.Template.Spec.SecurityContext = mcpServer.Spec.PodSecurityContext
+	// Apply pod security context if specified
+	if mcpServer.Spec.PodSecurityContext != nil {
+		deployment.Spec.Template.Spec.SecurityContext = mcpServer.Spec.PodSecurityContext
+	}
 
 	return deployment, nil
 }
@@ -481,6 +488,18 @@ func serviceAccountName(name string) string {
 		return "default"
 	}
 	return name
+}
+
+// defaultContainerSecurityContext returns the "restricted" Pod Security Standard
+// security context applied to MCP server containers by default.
+func defaultContainerSecurityContext() *corev1.SecurityContext {
+	return &corev1.SecurityContext{
+		AllowPrivilegeEscalation: ptr.To(false),
+		ReadOnlyRootFilesystem:   ptr.To(true),
+		RunAsNonRoot:             ptr.To(true),
+		Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
+		SeccompProfile:           &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
+	}
 }
 
 // SetupWithManager sets up the controller with the Manager.
