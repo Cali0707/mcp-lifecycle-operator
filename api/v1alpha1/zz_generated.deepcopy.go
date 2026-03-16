@@ -98,6 +98,11 @@ func (in *MCPServerSpec) DeepCopyInto(out *MCPServerSpec) {
 		*out = new(v1.LocalObjectReference)
 		**out = **in
 	}
+	if in.Replicas != nil {
+		in, out := &in.Replicas, &out.Replicas
+		*out = new(int32)
+		**out = **in
+	}
 	if in.Env != nil {
 		in, out := &in.Env, &out.Env
 		*out = make([]v1.EnvVar, len(*in))

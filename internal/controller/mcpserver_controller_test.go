@@ -28,6 +28,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -536,6 +537,194 @@ var _ = Describe("MCPServer Controller", func() {
 			mcpServer := &mcpv1alpha1.MCPServer{}
 			Expect(k8sClient.Get(ctx, client.ObjectKey{Name: resourceName + "-none", Namespace: "default"}, mcpServer)).To(Succeed())
 			Expect(k8sClient.Delete(ctx, mcpServer)).To(Succeed())
+		})
+	})
+
+	Context("When reconciling a resource with replicas", func() {
+		const resourceName = "test-resource-replicas"
+
+		ctx := context.Background()
+
+		typeNamespacedName := types.NamespacedName{
+			Name:      resourceName,
+			Namespace: "default",
+		}
+
+		AfterEach(func() {
+			resource := &mcpv1alpha1.MCPServer{}
+			err := k8sClient.Get(ctx, typeNamespacedName, resource)
+			if err == nil {
+				Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
+			}
+		})
+
+		It("should set replicas on deployment when specified", func() {
+			resource := &mcpv1alpha1.MCPServer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      resourceName,
+					Namespace: "default",
+				},
+				Spec: mcpv1alpha1.MCPServerSpec{
+					Image:    "test-image:latest",
+					Port:     8080,
+					Replicas: ptr.To(int32(3)),
+				},
+			}
+			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+
+			controllerReconciler := &MCPServerReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: typeNamespacedName,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			deployment := &appsv1.Deployment{}
+			err = k8sClient.Get(ctx, client.ObjectKey{
+				Name:      resourceName,
+				Namespace: "default",
+			}, deployment)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(*deployment.Spec.Replicas).To(Equal(int32(3)))
+		})
+
+		It("should default to 1 replica when not specified", func() {
+			resource := &mcpv1alpha1.MCPServer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      resourceName,
+					Namespace: "default",
+				},
+				Spec: mcpv1alpha1.MCPServerSpec{
+					Image: "test-image:latest",
+					Port:  8080,
+				},
+			}
+			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+
+			controllerReconciler := &MCPServerReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: typeNamespacedName,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			deployment := &appsv1.Deployment{}
+			err = k8sClient.Get(ctx, client.ObjectKey{
+				Name:      resourceName,
+				Namespace: "default",
+			}, deployment)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(*deployment.Spec.Replicas).To(Equal(int32(1)))
+		})
+
+		It("should update deployment when replicas changes", func() {
+			resource := &mcpv1alpha1.MCPServer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      resourceName,
+					Namespace: "default",
+				},
+				Spec: mcpv1alpha1.MCPServerSpec{
+					Image:    "test-image:latest",
+					Port:     8080,
+					Replicas: ptr.To(int32(2)),
+				},
+			}
+			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+
+			controllerReconciler := &MCPServerReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			By("Reconciling to create the initial deployment with 2 replicas")
+			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: typeNamespacedName,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			deployment := &appsv1.Deployment{}
+			err = k8sClient.Get(ctx, client.ObjectKey{
+				Name:      resourceName,
+				Namespace: "default",
+			}, deployment)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(*deployment.Spec.Replicas).To(Equal(int32(2)))
+
+			By("Updating replicas to 5")
+			mcpServer := &mcpv1alpha1.MCPServer{}
+			Expect(k8sClient.Get(ctx, typeNamespacedName, mcpServer)).To(Succeed())
+			mcpServer.Spec.Replicas = ptr.To(int32(5))
+			Expect(k8sClient.Update(ctx, mcpServer)).To(Succeed())
+
+			By("Reconciling again to pick up the change")
+			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: typeNamespacedName,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			err = k8sClient.Get(ctx, client.ObjectKey{
+				Name:      resourceName,
+				Namespace: "default",
+			}, deployment)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(*deployment.Spec.Replicas).To(Equal(int32(5)))
+		})
+
+		It("should update deployment when replicas is removed", func() {
+			resource := &mcpv1alpha1.MCPServer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      resourceName,
+					Namespace: "default",
+				},
+				Spec: mcpv1alpha1.MCPServerSpec{
+					Image:    "test-image:latest",
+					Port:     8080,
+					Replicas: ptr.To(int32(3)),
+				},
+			}
+			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+
+			controllerReconciler := &MCPServerReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			By("Reconciling to create the initial deployment with 3 replicas")
+			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: typeNamespacedName,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			deployment := &appsv1.Deployment{}
+			err = k8sClient.Get(ctx, client.ObjectKey{
+				Name:      resourceName,
+				Namespace: "default",
+			}, deployment)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(*deployment.Spec.Replicas).To(Equal(int32(3)))
+
+			By("Removing replicas from the MCPServer")
+			mcpServer := &mcpv1alpha1.MCPServer{}
+			Expect(k8sClient.Get(ctx, typeNamespacedName, mcpServer)).To(Succeed())
+			mcpServer.Spec.Replicas = nil
+			Expect(k8sClient.Update(ctx, mcpServer)).To(Succeed())
+
+			By("Reconciling again to pick up the removal")
+			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: typeNamespacedName,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			err = k8sClient.Get(ctx, client.ObjectKey{
+				Name:      resourceName,
+				Namespace: "default",
+			}, deployment)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(*deployment.Spec.Replicas).To(Equal(int32(1)))
 		})
 	})
 

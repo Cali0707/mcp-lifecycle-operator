@@ -80,6 +80,12 @@ type MCPServerSpec struct {
 	// +optional
 	ConfigMapVolumeName string `json:"configMapVolumeName,omitempty"`
 
+	// Replicas is the number of MCP server pod replicas to run.
+	// Defaults to 1 if not specified.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	Replicas *int32 `json:"replicas,omitempty"`
+
 	// ServiceAccountName is the name of the ServiceAccount to use for the MCP server pods.
 	// The ServiceAccount should have appropriate RBAC permissions for the MCP server's operations.
 	// If not specified, the default ServiceAccount for the namespace will be used.

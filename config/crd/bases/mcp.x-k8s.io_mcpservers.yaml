@@ -558,6 +558,13 @@ spec:
                 maximum: 65535
                 minimum: 1
                 type: integer
+              replicas:
+                description: |-
+                  Replicas is the number of MCP server pod replicas to run.
+                  Defaults to 1 if not specified.
+                format: int32
+                minimum: 1
+                type: integer
               secretKey:
                 description: |-
                   SecretKey specifies the key of the Secret to mount.
