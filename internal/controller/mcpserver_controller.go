@@ -244,9 +244,11 @@ func (r *MCPServerReconciler) reconcileDeployment(
 		!equality.Semantic.DeepEqual(oldPodSpec.SecurityContext, newPodSpec.SecurityContext) ||
 		!equality.Semantic.DeepEqual(oldPodSpec.Volumes, newPodSpec.Volumes) ||
 		!equality.Semantic.DeepEqual(oldPodSpec.Containers[0].VolumeMounts, newPodSpec.Containers[0].VolumeMounts) ||
-		oldPodSpec.ServiceAccountName != newPodSpec.ServiceAccountName
+		oldPodSpec.ServiceAccountName != newPodSpec.ServiceAccountName ||
+		!equality.Semantic.DeepEqual(existingDeployment.Spec.Replicas, deployment.Spec.Replicas)
 	if needsUpdate {
 		logger.Info("Updating Deployment", "name", existingDeployment.Name)
+		existingDeployment.Spec.Replicas = deployment.Spec.Replicas
 		existingDeployment.Spec.Template.Spec = deployment.Spec.Template.Spec
 		if err := r.Update(ctx, existingDeployment); err != nil {
 			logger.Error(err, "Failed to update Deployment")
@@ -262,6 +264,9 @@ func (r *MCPServerReconciler) reconcileDeployment(
 // createDeployment creates a Deployment for the MCPServer
 func (r *MCPServerReconciler) createDeployment(ctx context.Context, mcpServer *mcpv1alpha1.MCPServer) (*appsv1.Deployment, error) {
 	replicas := int32(1)
+	if mcpServer.Spec.Replicas != nil {
+		replicas = *mcpServer.Spec.Replicas
+	}
 	labels := map[string]string{
 		"app":        "mcp-server",
 		"mcp-server": mcpServer.Name,
