@@ -10,3 +10,4 @@ spec:
       ref: quay.io/matzew/mcp-everything:latest
   config:
     port: 3001
+  path: /mcp
