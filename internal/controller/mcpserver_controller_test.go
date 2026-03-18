@@ -1386,10 +1386,12 @@ var _ = Describe("MCPServer Controller - Storage Mounts", func() {
 						Storage: []mcpv1alpha1.StorageMount{
 							{
 								Path: "/etc/config",
-								Type: mcpv1alpha1.StorageTypeConfigMap,
-								ConfigMap: &corev1.ConfigMapVolumeSource{
-									LocalObjectReference: corev1.LocalObjectReference{
-										Name: "test-configmap",
+								Source: mcpv1alpha1.StorageSource{
+									Type: mcpv1alpha1.StorageTypeConfigMap,
+									ConfigMap: &corev1.ConfigMapVolumeSource{
+										LocalObjectReference: corev1.LocalObjectReference{
+											Name: "test-configmap",
+										},
 									},
 								},
 							},
@@ -1486,9 +1488,11 @@ var _ = Describe("MCPServer Controller - Storage Mounts", func() {
 						Storage: []mcpv1alpha1.StorageMount{
 							{
 								Path: "/etc/secret",
-								Type: mcpv1alpha1.StorageTypeSecret,
-								Secret: &corev1.SecretVolumeSource{
-									SecretName: "test-secret",
+								Source: mcpv1alpha1.StorageSource{
+									Type: mcpv1alpha1.StorageTypeSecret,
+									Secret: &corev1.SecretVolumeSource{
+										SecretName: "test-secret",
+									},
 								},
 							},
 						},
@@ -1596,18 +1600,22 @@ var _ = Describe("MCPServer Controller - Storage Mounts", func() {
 						Storage: []mcpv1alpha1.StorageMount{
 							{
 								Path: "/etc/config",
-								Type: mcpv1alpha1.StorageTypeConfigMap,
-								ConfigMap: &corev1.ConfigMapVolumeSource{
-									LocalObjectReference: corev1.LocalObjectReference{
-										Name: "test-multi-configmap",
+								Source: mcpv1alpha1.StorageSource{
+									Type: mcpv1alpha1.StorageTypeConfigMap,
+									ConfigMap: &corev1.ConfigMapVolumeSource{
+										LocalObjectReference: corev1.LocalObjectReference{
+											Name: "test-multi-configmap",
+										},
 									},
 								},
 							},
 							{
 								Path: "/etc/secret",
-								Type: mcpv1alpha1.StorageTypeSecret,
-								Secret: &corev1.SecretVolumeSource{
-									SecretName: "test-multi-secret",
+								Source: mcpv1alpha1.StorageSource{
+									Type: mcpv1alpha1.StorageTypeSecret,
+									Secret: &corev1.SecretVolumeSource{
+										SecretName: "test-multi-secret",
+									},
 								},
 							},
 						},
@@ -1720,11 +1728,13 @@ var _ = Describe("MCPServer Controller - Storage Mounts", func() {
 						Storage: []mcpv1alpha1.StorageMount{
 							{
 								Path:        "/etc/config",
-								Type:        mcpv1alpha1.StorageTypeConfigMap,
 								Permissions: mcpv1alpha1.MountPermissionsReadWrite, // Explicitly set to read-write
-								ConfigMap: &corev1.ConfigMapVolumeSource{
-									LocalObjectReference: corev1.LocalObjectReference{
-										Name: "test-configmap-rw",
+								Source: mcpv1alpha1.StorageSource{
+									Type: mcpv1alpha1.StorageTypeConfigMap,
+									ConfigMap: &corev1.ConfigMapVolumeSource{
+										LocalObjectReference: corev1.LocalObjectReference{
+											Name: "test-configmap-rw",
+										},
 									},
 								},
 							},
@@ -1802,10 +1812,12 @@ var _ = Describe("MCPServer Controller - Storage Mounts", func() {
 						Storage: []mcpv1alpha1.StorageMount{
 							{
 								Path: "/etc/config",
-								Type: mcpv1alpha1.StorageTypeConfigMap,
-								ConfigMap: &corev1.ConfigMapVolumeSource{
-									LocalObjectReference: corev1.LocalObjectReference{
-										Name: "nonexistent-configmap",
+								Source: mcpv1alpha1.StorageSource{
+									Type: mcpv1alpha1.StorageTypeConfigMap,
+									ConfigMap: &corev1.ConfigMapVolumeSource{
+										LocalObjectReference: corev1.LocalObjectReference{
+											Name: "nonexistent-configmap",
+										},
 									},
 								},
 							},
@@ -1865,9 +1877,11 @@ var _ = Describe("MCPServer Controller - Storage Mounts", func() {
 						Storage: []mcpv1alpha1.StorageMount{
 							{
 								Path: "/etc/secret",
-								Type: mcpv1alpha1.StorageTypeSecret,
-								Secret: &corev1.SecretVolumeSource{
-									SecretName: "nonexistent-secret",
+								Source: mcpv1alpha1.StorageSource{
+									Type: mcpv1alpha1.StorageTypeSecret,
+									Secret: &corev1.SecretVolumeSource{
+										SecretName: "nonexistent-secret",
+									},
 								},
 							},
 						},
@@ -1927,12 +1941,14 @@ var _ = Describe("MCPServer Controller - Storage Mounts", func() {
 						Storage: []mcpv1alpha1.StorageMount{
 							{
 								Path: "/etc/config",
-								Type: mcpv1alpha1.StorageTypeConfigMap,
-								ConfigMap: &corev1.ConfigMapVolumeSource{
-									LocalObjectReference: corev1.LocalObjectReference{
-										Name: "optional-configmap",
+								Source: mcpv1alpha1.StorageSource{
+									Type: mcpv1alpha1.StorageTypeConfigMap,
+									ConfigMap: &corev1.ConfigMapVolumeSource{
+										LocalObjectReference: corev1.LocalObjectReference{
+											Name: "optional-configmap",
+										},
+										Optional: ptr.To(true),
 									},
-									Optional: ptr.To(true),
 								},
 							},
 						},
@@ -2006,10 +2022,12 @@ var _ = Describe("MCPServer Controller - Storage Mounts", func() {
 						Storage: []mcpv1alpha1.StorageMount{
 							{
 								Path: "/etc/secret",
-								Type: mcpv1alpha1.StorageTypeSecret,
-								Secret: &corev1.SecretVolumeSource{
-									SecretName: "optional-secret",
-									Optional:   ptr.To(true),
+								Source: mcpv1alpha1.StorageSource{
+									Type: mcpv1alpha1.StorageTypeSecret,
+									Secret: &corev1.SecretVolumeSource{
+										SecretName: "optional-secret",
+										Optional:   ptr.To(true),
+									},
 								},
 							},
 						},
@@ -2082,10 +2100,12 @@ var _ = Describe("MCPServer Controller - Storage Mounts", func() {
 						Storage: []mcpv1alpha1.StorageMount{
 							{
 								Path: "/etc/config",
-								Type: mcpv1alpha1.StorageTypeConfigMap,
-								ConfigMap: &corev1.ConfigMapVolumeSource{
-									LocalObjectReference: corev1.LocalObjectReference{
-										Name: "", // Empty name
+								Source: mcpv1alpha1.StorageSource{
+									Type: mcpv1alpha1.StorageTypeConfigMap,
+									ConfigMap: &corev1.ConfigMapVolumeSource{
+										LocalObjectReference: corev1.LocalObjectReference{
+											Name: "", // Empty name
+										},
 									},
 								},
 							},
@@ -2144,9 +2164,11 @@ var _ = Describe("MCPServer Controller - Storage Mounts", func() {
 						Storage: []mcpv1alpha1.StorageMount{
 							{
 								Path: "/etc/secret",
-								Type: mcpv1alpha1.StorageTypeSecret,
-								Secret: &corev1.SecretVolumeSource{
-									SecretName: "", // Empty name
+								Source: mcpv1alpha1.StorageSource{
+									Type: mcpv1alpha1.StorageTypeSecret,
+									Secret: &corev1.SecretVolumeSource{
+										SecretName: "", // Empty name
+									},
 								},
 							},
 						},

@@ -189,10 +189,12 @@ var _ = Describe("MCPServer Validation", func() {
 						Storage: []StorageMount{
 							{
 								Path: "/etc/config",
-								Type: StorageTypeConfigMap,
-								ConfigMap: &corev1.ConfigMapVolumeSource{
-									LocalObjectReference: corev1.LocalObjectReference{
-										Name: "test-config",
+								Source: StorageSource{
+									Type: StorageTypeConfigMap,
+									ConfigMap: &corev1.ConfigMapVolumeSource{
+										LocalObjectReference: corev1.LocalObjectReference{
+											Name: "test-config",
+										},
 									},
 								},
 							},
@@ -221,9 +223,11 @@ var _ = Describe("MCPServer Validation", func() {
 						Storage: []StorageMount{
 							{
 								Path: "/etc/secret",
-								Type: StorageTypeSecret,
-								Secret: &corev1.SecretVolumeSource{
-									SecretName: "test-secret",
+								Source: StorageSource{
+									Type: StorageTypeSecret,
+									Secret: &corev1.SecretVolumeSource{
+										SecretName: "test-secret",
+									},
 								},
 							},
 						},
@@ -251,14 +255,16 @@ var _ = Describe("MCPServer Validation", func() {
 						Storage: []StorageMount{
 							{
 								Path: "/etc/config",
-								Type: StorageTypeConfigMap,
-								ConfigMap: &corev1.ConfigMapVolumeSource{
-									LocalObjectReference: corev1.LocalObjectReference{
-										Name: "test-config",
+								Source: StorageSource{
+									Type: StorageTypeConfigMap,
+									ConfigMap: &corev1.ConfigMapVolumeSource{
+										LocalObjectReference: corev1.LocalObjectReference{
+											Name: "test-config",
+										},
 									},
-								},
-								Secret: &corev1.SecretVolumeSource{
-									SecretName: "test-secret",
+									Secret: &corev1.SecretVolumeSource{
+										SecretName: "test-secret",
+									},
 								},
 							},
 						},
@@ -290,9 +296,11 @@ var _ = Describe("MCPServer Validation", func() {
 						Storage: []StorageMount{
 							{
 								Path: "/etc/config",
-								Type: StorageTypeConfigMap, // Type says ConfigMap
-								Secret: &corev1.SecretVolumeSource{ // But Secret is set
-									SecretName: "test-secret",
+								Source: StorageSource{
+									Type: StorageTypeConfigMap, // Type says ConfigMap
+									Secret: &corev1.SecretVolumeSource{ // But Secret is set
+										SecretName: "test-secret",
+									},
 								},
 							},
 						},
@@ -323,10 +331,12 @@ var _ = Describe("MCPServer Validation", func() {
 						Storage: []StorageMount{
 							{
 								Path: "/etc/secret",
-								Type: StorageTypeSecret, // Type says Secret
-								ConfigMap: &corev1.ConfigMapVolumeSource{ // But ConfigMap is set
-									LocalObjectReference: corev1.LocalObjectReference{
-										Name: "test-config",
+								Source: StorageSource{
+									Type: StorageTypeSecret, // Type says Secret
+									ConfigMap: &corev1.ConfigMapVolumeSource{ // But ConfigMap is set
+										LocalObjectReference: corev1.LocalObjectReference{
+											Name: "test-config",
+										},
 									},
 								},
 							},
@@ -357,10 +367,12 @@ var _ = Describe("MCPServer Validation", func() {
 						Port: 8080,
 						Storage: []StorageMount{
 							{
-								Path:      "/etc/config",
-								Type:      StorageTypeConfigMap,
-								ConfigMap: nil,
-								Secret:    nil,
+								Path: "/etc/config",
+								Source: StorageSource{
+									Type:      StorageTypeConfigMap,
+									ConfigMap: nil,
+									Secret:    nil,
+								},
 							},
 						},
 					},
@@ -390,10 +402,12 @@ var _ = Describe("MCPServer Validation", func() {
 						Storage: []StorageMount{
 							{
 								Path: "etc/config", // Invalid: relative path
-								Type: StorageTypeConfigMap,
-								ConfigMap: &corev1.ConfigMapVolumeSource{
-									LocalObjectReference: corev1.LocalObjectReference{
-										Name: "test-config",
+								Source: StorageSource{
+									Type: StorageTypeConfigMap,
+									ConfigMap: &corev1.ConfigMapVolumeSource{
+										LocalObjectReference: corev1.LocalObjectReference{
+											Name: "test-config",
+										},
 									},
 								},
 							},
@@ -428,10 +442,12 @@ var _ = Describe("MCPServer Validation", func() {
 						Storage: []StorageMount{
 							{
 								Path: "/etc/config", // Valid: absolute path
-								Type: StorageTypeConfigMap,
-								ConfigMap: &corev1.ConfigMapVolumeSource{
-									LocalObjectReference: corev1.LocalObjectReference{
-										Name: "test-config",
+								Source: StorageSource{
+									Type: StorageTypeConfigMap,
+									ConfigMap: &corev1.ConfigMapVolumeSource{
+										LocalObjectReference: corev1.LocalObjectReference{
+											Name: "test-config",
+										},
 									},
 								},
 							},
@@ -460,11 +476,13 @@ var _ = Describe("MCPServer Validation", func() {
 						Storage: []StorageMount{
 							{
 								Path:        "/etc/config",
-								Type:        StorageTypeConfigMap,
 								Permissions: MountPermissionsReadOnly,
-								ConfigMap: &corev1.ConfigMapVolumeSource{
-									LocalObjectReference: corev1.LocalObjectReference{
-										Name: "test-config",
+								Source: StorageSource{
+									Type: StorageTypeConfigMap,
+									ConfigMap: &corev1.ConfigMapVolumeSource{
+										LocalObjectReference: corev1.LocalObjectReference{
+											Name: "test-config",
+										},
 									},
 								},
 							},
@@ -493,11 +511,13 @@ var _ = Describe("MCPServer Validation", func() {
 						Storage: []StorageMount{
 							{
 								Path:        "/etc/config",
-								Type:        StorageTypeConfigMap,
 								Permissions: MountPermissionsReadWrite,
-								ConfigMap: &corev1.ConfigMapVolumeSource{
-									LocalObjectReference: corev1.LocalObjectReference{
-										Name: "test-config",
+								Source: StorageSource{
+									Type: StorageTypeConfigMap,
+									ConfigMap: &corev1.ConfigMapVolumeSource{
+										LocalObjectReference: corev1.LocalObjectReference{
+											Name: "test-config",
+										},
 									},
 								},
 							},
@@ -526,11 +546,13 @@ var _ = Describe("MCPServer Validation", func() {
 						Storage: []StorageMount{
 							{
 								Path:        "/etc/config",
-								Type:        StorageTypeConfigMap,
 								Permissions: MountPermissionsRecursiveReadOnly,
-								ConfigMap: &corev1.ConfigMapVolumeSource{
-									LocalObjectReference: corev1.LocalObjectReference{
-										Name: "test-config",
+								Source: StorageSource{
+									Type: StorageTypeConfigMap,
+									ConfigMap: &corev1.ConfigMapVolumeSource{
+										LocalObjectReference: corev1.LocalObjectReference{
+											Name: "test-config",
+										},
 									},
 								},
 							},
@@ -559,11 +581,13 @@ var _ = Describe("MCPServer Validation", func() {
 						Storage: []StorageMount{
 							{
 								Path: "/etc/config",
-								Type: StorageTypeConfigMap,
 								// Permissions not specified - should default to ReadOnly
-								ConfigMap: &corev1.ConfigMapVolumeSource{
-									LocalObjectReference: corev1.LocalObjectReference{
-										Name: "test-config",
+								Source: StorageSource{
+									Type: StorageTypeConfigMap,
+									ConfigMap: &corev1.ConfigMapVolumeSource{
+										LocalObjectReference: corev1.LocalObjectReference{
+											Name: "test-config",
+										},
 									},
 								},
 							},
@@ -592,11 +616,13 @@ var _ = Describe("MCPServer Validation", func() {
 						Storage: []StorageMount{
 							{
 								Path:        "/etc/config",
-								Type:        StorageTypeConfigMap,
 								Permissions: "InvalidValue", // Invalid enum value
-								ConfigMap: &corev1.ConfigMapVolumeSource{
-									LocalObjectReference: corev1.LocalObjectReference{
-										Name: "test-config",
+								Source: StorageSource{
+									Type: StorageTypeConfigMap,
+									ConfigMap: &corev1.ConfigMapVolumeSource{
+										LocalObjectReference: corev1.LocalObjectReference{
+											Name: "test-config",
+										},
 									},
 								},
 							},
@@ -628,10 +654,12 @@ var _ = Describe("MCPServer Validation", func() {
 						Storage: []StorageMount{
 							{
 								Path: "/etc/config-123_test.dir/sub-dir", // Valid: common special chars
-								Type: StorageTypeConfigMap,
-								ConfigMap: &corev1.ConfigMapVolumeSource{
-									LocalObjectReference: corev1.LocalObjectReference{
-										Name: "test-config",
+								Source: StorageSource{
+									Type: StorageTypeConfigMap,
+									ConfigMap: &corev1.ConfigMapVolumeSource{
+										LocalObjectReference: corev1.LocalObjectReference{
+											Name: "test-config",
+										},
 									},
 								},
 							},
@@ -660,10 +688,12 @@ var _ = Describe("MCPServer Validation", func() {
 						Storage: []StorageMount{
 							{
 								Path: "etc/config", // Invalid: not absolute path
-								Type: StorageTypeConfigMap,
-								ConfigMap: &corev1.ConfigMapVolumeSource{
-									LocalObjectReference: corev1.LocalObjectReference{
-										Name: "test-config",
+								Source: StorageSource{
+									Type: StorageTypeConfigMap,
+									ConfigMap: &corev1.ConfigMapVolumeSource{
+										LocalObjectReference: corev1.LocalObjectReference{
+											Name: "test-config",
+										},
 									},
 								},
 							},
@@ -699,10 +729,12 @@ var _ = Describe("MCPServer Validation", func() {
 						Storage: []StorageMount{
 							{
 								Path: longPath, // Invalid: >4096 characters
-								Type: StorageTypeConfigMap,
-								ConfigMap: &corev1.ConfigMapVolumeSource{
-									LocalObjectReference: corev1.LocalObjectReference{
-										Name: "test-config",
+								Source: StorageSource{
+									Type: StorageTypeConfigMap,
+									ConfigMap: &corev1.ConfigMapVolumeSource{
+										LocalObjectReference: corev1.LocalObjectReference{
+											Name: "test-config",
+										},
 									},
 								},
 							},
@@ -734,10 +766,12 @@ var _ = Describe("MCPServer Validation", func() {
 						Storage: []StorageMount{
 							{
 								Path: "/etc/config:data", // Invalid: contains colon
-								Type: StorageTypeConfigMap,
-								ConfigMap: &corev1.ConfigMapVolumeSource{
-									LocalObjectReference: corev1.LocalObjectReference{
-										Name: "test-config",
+								Source: StorageSource{
+									Type: StorageTypeConfigMap,
+									ConfigMap: &corev1.ConfigMapVolumeSource{
+										LocalObjectReference: corev1.LocalObjectReference{
+											Name: "test-config",
+										},
 									},
 								},
 							},
@@ -871,18 +905,22 @@ var _ = Describe("MCPServer Validation", func() {
 						Storage: []StorageMount{
 							{
 								Path: "/etc/config",
-								Type: StorageTypeConfigMap,
-								ConfigMap: &corev1.ConfigMapVolumeSource{
-									LocalObjectReference: corev1.LocalObjectReference{
-										Name: "test-config",
+								Source: StorageSource{
+									Type: StorageTypeConfigMap,
+									ConfigMap: &corev1.ConfigMapVolumeSource{
+										LocalObjectReference: corev1.LocalObjectReference{
+											Name: "test-config",
+										},
 									},
 								},
 							},
 							{
 								Path: "/etc/secret",
-								Type: StorageTypeSecret,
-								Secret: &corev1.SecretVolumeSource{
-									SecretName: "test-secret",
+								Source: StorageSource{
+									Type: StorageTypeSecret,
+									Secret: &corev1.SecretVolumeSource{
+										SecretName: "test-secret",
+									},
 								},
 							},
 						},

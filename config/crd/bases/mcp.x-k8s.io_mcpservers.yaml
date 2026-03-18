@@ -296,79 +296,11 @@ spec:
                       Each item uses native Kubernetes volume source types for consistency and feature parity.
                       Maximum 64 items.
                     items:
-                      description: StorageMount defines a storage mount combining
-                        volume source and mount configuration.
+                      description: |-
+                        StorageMount defines a storage mount combining volume source and mount configuration.
+                        The Path and Permissions fields apply to all storage types, while Source contains
+                        the type-specific configuration (ConfigMap or Secret).
                       properties:
-                        configMap:
-                          description: |-
-                            ConfigMap specifies a ConfigMap volume source (when Type is ConfigMap).
-                            Uses native Kubernetes ConfigMapVolumeSource type for full feature parity.
-                          properties:
-                            defaultMode:
-                              description: |-
-                                defaultMode is optional: mode bits used to set permissions on created files by default.
-                                Must be an octal value between 0000 and 0777 or a decimal value between 0 and 511.
-                                YAML accepts both octal and decimal values, JSON requires decimal values for mode bits.
-                                Defaults to 0644.
-                                Directories within the path are not affected by this setting.
-                                This might be in conflict with other options that affect the file
-                                mode, like fsGroup, and the result can be other mode bits set.
-                              format: int32
-                              type: integer
-                            items:
-                              description: |-
-                                items if unspecified, each key-value pair in the Data field of the referenced
-                                ConfigMap will be projected into the volume as a file whose name is the
-                                key and content is the value. If specified, the listed keys will be
-                                projected into the specified paths, and unlisted keys will not be
-                                present. If a key is specified which is not present in the ConfigMap,
-                                the volume setup will error unless it is marked optional. Paths must be
-                                relative and may not contain the '..' path or start with '..'.
-                              items:
-                                description: Maps a string key to a path within a
-                                  volume.
-                                properties:
-                                  key:
-                                    description: key is the key to project.
-                                    type: string
-                                  mode:
-                                    description: |-
-                                      mode is Optional: mode bits used to set permissions on this file.
-                                      Must be an octal value between 0000 and 0777 or a decimal value between 0 and 511.
-                                      YAML accepts both octal and decimal values, JSON requires decimal values for mode bits.
-                                      If not specified, the volume defaultMode will be used.
-                                      This might be in conflict with other options that affect the file
-                                      mode, like fsGroup, and the result can be other mode bits set.
-                                    format: int32
-                                    type: integer
-                                  path:
-                                    description: |-
-                                      path is the relative path of the file to map the key to.
-                                      May not be an absolute path.
-                                      May not contain the path element '..'.
-                                      May not start with the string '..'.
-                                    type: string
-                                required:
-                                - key
-                                - path
-                                type: object
-                              type: array
-                              x-kubernetes-list-type: atomic
-                            name:
-                              default: ""
-                              description: |-
-                                Name of the referent.
-                                This field is effectively required, but due to backwards compatibility is
-                                allowed to be empty. Instances of this type with an empty value here are
-                                almost certainly wrong.
-                                More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                              type: string
-                            optional:
-                              description: optional specify whether the ConfigMap
-                                or its keys must be defined
-                              type: boolean
-                          type: object
-                          x-kubernetes-map-type: atomic
                         path:
                           description: |-
                             Path is a required field that specifies where the volume should be mounted in the container.
@@ -398,92 +330,169 @@ spec:
                           - ReadWrite
                           - RecursiveReadOnly
                           type: string
-                        secret:
-                          description: |-
-                            Secret specifies a Secret volume source (when Type is Secret).
-                            Uses native Kubernetes SecretVolumeSource type for full feature parity.
+                        source:
+                          description: Source defines where the storage data comes
+                            from (ConfigMap or Secret).
                           properties:
-                            defaultMode:
+                            configMap:
                               description: |-
-                                defaultMode is Optional: mode bits used to set permissions on created files by default.
-                                Must be an octal value between 0000 and 0777 or a decimal value between 0 and 511.
-                                YAML accepts both octal and decimal values, JSON requires decimal values
-                                for mode bits. Defaults to 0644.
-                                Directories within the path are not affected by this setting.
-                                This might be in conflict with other options that affect the file
-                                mode, like fsGroup, and the result can be other mode bits set.
-                              format: int32
-                              type: integer
-                            items:
+                                ConfigMap specifies a ConfigMap volume source (when Type is ConfigMap).
+                                Uses native Kubernetes ConfigMapVolumeSource type for full feature parity.
+                              properties:
+                                defaultMode:
+                                  description: |-
+                                    defaultMode is optional: mode bits used to set permissions on created files by default.
+                                    Must be an octal value between 0000 and 0777 or a decimal value between 0 and 511.
+                                    YAML accepts both octal and decimal values, JSON requires decimal values for mode bits.
+                                    Defaults to 0644.
+                                    Directories within the path are not affected by this setting.
+                                    This might be in conflict with other options that affect the file
+                                    mode, like fsGroup, and the result can be other mode bits set.
+                                  format: int32
+                                  type: integer
+                                items:
+                                  description: |-
+                                    items if unspecified, each key-value pair in the Data field of the referenced
+                                    ConfigMap will be projected into the volume as a file whose name is the
+                                    key and content is the value. If specified, the listed keys will be
+                                    projected into the specified paths, and unlisted keys will not be
+                                    present. If a key is specified which is not present in the ConfigMap,
+                                    the volume setup will error unless it is marked optional. Paths must be
+                                    relative and may not contain the '..' path or start with '..'.
+                                  items:
+                                    description: Maps a string key to a path within
+                                      a volume.
+                                    properties:
+                                      key:
+                                        description: key is the key to project.
+                                        type: string
+                                      mode:
+                                        description: |-
+                                          mode is Optional: mode bits used to set permissions on this file.
+                                          Must be an octal value between 0000 and 0777 or a decimal value between 0 and 511.
+                                          YAML accepts both octal and decimal values, JSON requires decimal values for mode bits.
+                                          If not specified, the volume defaultMode will be used.
+                                          This might be in conflict with other options that affect the file
+                                          mode, like fsGroup, and the result can be other mode bits set.
+                                        format: int32
+                                        type: integer
+                                      path:
+                                        description: |-
+                                          path is the relative path of the file to map the key to.
+                                          May not be an absolute path.
+                                          May not contain the path element '..'.
+                                          May not start with the string '..'.
+                                        type: string
+                                    required:
+                                    - key
+                                    - path
+                                    type: object
+                                  type: array
+                                  x-kubernetes-list-type: atomic
+                                name:
+                                  default: ""
+                                  description: |-
+                                    Name of the referent.
+                                    This field is effectively required, but due to backwards compatibility is
+                                    allowed to be empty. Instances of this type with an empty value here are
+                                    almost certainly wrong.
+                                    More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                                  type: string
+                                optional:
+                                  description: optional specify whether the ConfigMap
+                                    or its keys must be defined
+                                  type: boolean
+                              type: object
+                              x-kubernetes-map-type: atomic
+                            secret:
                               description: |-
-                                items If unspecified, each key-value pair in the Data field of the referenced
-                                Secret will be projected into the volume as a file whose name is the
-                                key and content is the value. If specified, the listed keys will be
-                                projected into the specified paths, and unlisted keys will not be
-                                present. If a key is specified which is not present in the Secret,
-                                the volume setup will error unless it is marked optional. Paths must be
-                                relative and may not contain the '..' path or start with '..'.
-                              items:
-                                description: Maps a string key to a path within a
-                                  volume.
-                                properties:
-                                  key:
-                                    description: key is the key to project.
-                                    type: string
-                                  mode:
-                                    description: |-
-                                      mode is Optional: mode bits used to set permissions on this file.
-                                      Must be an octal value between 0000 and 0777 or a decimal value between 0 and 511.
-                                      YAML accepts both octal and decimal values, JSON requires decimal values for mode bits.
-                                      If not specified, the volume defaultMode will be used.
-                                      This might be in conflict with other options that affect the file
-                                      mode, like fsGroup, and the result can be other mode bits set.
-                                    format: int32
-                                    type: integer
-                                  path:
-                                    description: |-
-                                      path is the relative path of the file to map the key to.
-                                      May not be an absolute path.
-                                      May not contain the path element '..'.
-                                      May not start with the string '..'.
-                                    type: string
-                                required:
-                                - key
-                                - path
-                                type: object
-                              type: array
-                              x-kubernetes-list-type: atomic
-                            optional:
-                              description: optional field specify whether the Secret
-                                or its keys must be defined
-                              type: boolean
-                            secretName:
+                                Secret specifies a Secret volume source (when Type is Secret).
+                                Uses native Kubernetes SecretVolumeSource type for full feature parity.
+                              properties:
+                                defaultMode:
+                                  description: |-
+                                    defaultMode is Optional: mode bits used to set permissions on created files by default.
+                                    Must be an octal value between 0000 and 0777 or a decimal value between 0 and 511.
+                                    YAML accepts both octal and decimal values, JSON requires decimal values
+                                    for mode bits. Defaults to 0644.
+                                    Directories within the path are not affected by this setting.
+                                    This might be in conflict with other options that affect the file
+                                    mode, like fsGroup, and the result can be other mode bits set.
+                                  format: int32
+                                  type: integer
+                                items:
+                                  description: |-
+                                    items If unspecified, each key-value pair in the Data field of the referenced
+                                    Secret will be projected into the volume as a file whose name is the
+                                    key and content is the value. If specified, the listed keys will be
+                                    projected into the specified paths, and unlisted keys will not be
+                                    present. If a key is specified which is not present in the Secret,
+                                    the volume setup will error unless it is marked optional. Paths must be
+                                    relative and may not contain the '..' path or start with '..'.
+                                  items:
+                                    description: Maps a string key to a path within
+                                      a volume.
+                                    properties:
+                                      key:
+                                        description: key is the key to project.
+                                        type: string
+                                      mode:
+                                        description: |-
+                                          mode is Optional: mode bits used to set permissions on this file.
+                                          Must be an octal value between 0000 and 0777 or a decimal value between 0 and 511.
+                                          YAML accepts both octal and decimal values, JSON requires decimal values for mode bits.
+                                          If not specified, the volume defaultMode will be used.
+                                          This might be in conflict with other options that affect the file
+                                          mode, like fsGroup, and the result can be other mode bits set.
+                                        format: int32
+                                        type: integer
+                                      path:
+                                        description: |-
+                                          path is the relative path of the file to map the key to.
+                                          May not be an absolute path.
+                                          May not contain the path element '..'.
+                                          May not start with the string '..'.
+                                        type: string
+                                    required:
+                                    - key
+                                    - path
+                                    type: object
+                                  type: array
+                                  x-kubernetes-list-type: atomic
+                                optional:
+                                  description: optional field specify whether the
+                                    Secret or its keys must be defined
+                                  type: boolean
+                                secretName:
+                                  description: |-
+                                    secretName is the name of the secret in the pod's namespace to use.
+                                    More info: https://kubernetes.io/docs/concepts/storage/volumes#secret
+                                  type: string
+                              type: object
+                            type:
                               description: |-
-                                secretName is the name of the secret in the pod's namespace to use.
-                                More info: https://kubernetes.io/docs/concepts/storage/volumes#secret
+                                Type is a required field that specifies the type of volume source.
+                                Allowed values are: ConfigMap, Secret.
+                                This determines which volume source field (configMap or secret) should be configured.
+                              enum:
+                              - ConfigMap
+                              - Secret
                               type: string
+                          required:
+                          - type
                           type: object
-                        type:
-                          description: |-
-                            Type is a required field that specifies the type of volume source.
-                            Allowed values are: ConfigMap, Secret.
-                            This determines which volume source field (configMap or secret) should be configured.
-                          enum:
-                          - ConfigMap
-                          - Secret
-                          type: string
+                          x-kubernetes-validations:
+                          - message: configMap must be set when type is ConfigMap
+                              and must not be set otherwise
+                            rule: 'self.type == ''ConfigMap'' ? has(self.configMap)
+                              : !has(self.configMap)'
+                          - message: secret must be set when type is Secret and must
+                              not be set otherwise
+                            rule: 'self.type == ''Secret'' ? has(self.secret) : !has(self.secret)'
                       required:
                       - path
-                      - type
+                      - source
                       type: object
-                      x-kubernetes-validations:
-                      - message: configMap must be set when type is ConfigMap and
-                          must not be set otherwise
-                        rule: 'self.type == ''ConfigMap'' ? has(self.configMap) :
-                          !has(self.configMap)'
-                      - message: secret must be set when type is Secret and must not
-                          be set otherwise
-                        rule: 'self.type == ''Secret'' ? has(self.secret) : !has(self.secret)'
                     maxItems: 64
                     type: array
                 required:

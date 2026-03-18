@@ -105,9 +105,30 @@ const (
 	MountPermissionsRecursiveReadOnly MountPermissions = "RecursiveReadOnly"
 )
 
-// StorageMount defines a storage mount combining volume source and mount configuration.
+// StorageSource defines the source of the storage to mount (ConfigMap or Secret).
 // +kubebuilder:validation:XValidation:rule="self.type == 'ConfigMap' ? has(self.configMap) : !has(self.configMap)",message="configMap must be set when type is ConfigMap and must not be set otherwise"
 // +kubebuilder:validation:XValidation:rule="self.type == 'Secret' ? has(self.secret) : !has(self.secret)",message="secret must be set when type is Secret and must not be set otherwise"
+type StorageSource struct {
+	// Type is a required field that specifies the type of volume source.
+	// Allowed values are: ConfigMap, Secret.
+	// This determines which volume source field (configMap or secret) should be configured.
+	// +kubebuilder:validation:Required
+	Type StorageType `json:"type,omitempty"`
+
+	// ConfigMap specifies a ConfigMap volume source (when Type is ConfigMap).
+	// Uses native Kubernetes ConfigMapVolumeSource type for full feature parity.
+	// +optional
+	ConfigMap *corev1.ConfigMapVolumeSource `json:"configMap,omitempty"`
+
+	// Secret specifies a Secret volume source (when Type is Secret).
+	// Uses native Kubernetes SecretVolumeSource type for full feature parity.
+	// +optional
+	Secret *corev1.SecretVolumeSource `json:"secret,omitempty"`
+}
+
+// StorageMount defines a storage mount combining volume source and mount configuration.
+// The Path and Permissions fields apply to all storage types, while Source contains
+// the type-specific configuration (ConfigMap or Secret).
 type StorageMount struct {
 	// Path is a required field that specifies where the volume should be mounted in the container.
 	// Must be an absolute path (starting with /).
@@ -120,12 +141,6 @@ type StorageMount struct {
 	// +kubebuilder:validation:XValidation:rule="!self.contains(':')",message="path must not contain ':' character"
 	Path string `json:"path,omitempty"`
 
-	// Type is a required field that specifies the type of volume source.
-	// Allowed values are: ConfigMap, Secret.
-	// This determines which volume source field (configMap or secret) should be configured.
-	// +kubebuilder:validation:Required
-	Type StorageType `json:"type,omitempty"`
-
 	// Permissions specifies the access permissions for the mount.
 	// Allowed values are:
 	// - ReadOnly: mount is read-only
@@ -136,15 +151,9 @@ type StorageMount struct {
 	// +kubebuilder:default=ReadOnly
 	Permissions MountPermissions `json:"permissions,omitempty"`
 
-	// ConfigMap specifies a ConfigMap volume source (when Type is ConfigMap).
-	// Uses native Kubernetes ConfigMapVolumeSource type for full feature parity.
-	// +optional
-	ConfigMap *corev1.ConfigMapVolumeSource `json:"configMap,omitempty"`
-
-	// Secret specifies a Secret volume source (when Type is Secret).
-	// Uses native Kubernetes SecretVolumeSource type for full feature parity.
-	// +optional
-	Secret *corev1.SecretVolumeSource `json:"secret,omitempty"`
+	// Source defines where the storage data comes from (ConfigMap or Secret).
+	// +kubebuilder:validation:Required
+	Source StorageSource `json:"source,omitzero"`
 }
 
 // ServerConfig defines how the MCP server should be configured when it runs.

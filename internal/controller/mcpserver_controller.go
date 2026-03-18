@@ -365,47 +365,47 @@ func (r *MCPServerReconciler) createDeployment(ctx context.Context, mcpServer *m
 			Name: volumeName,
 		}
 
-		switch storage.Type {
+		switch storage.Source.Type {
 		case mcpv1alpha1.StorageTypeConfigMap:
-			if storage.ConfigMap == nil {
+			if storage.Source.ConfigMap == nil {
 				return nil, fmt.Errorf("configMap must be set when type is ConfigMap for storage mount at index %d", i)
 			}
 			// Validate ConfigMap name is not empty
-			if storage.ConfigMap.Name == "" {
+			if storage.Source.ConfigMap.Name == "" {
 				return nil, fmt.Errorf("configMap name must not be empty for storage mount at index %d", i)
 			}
 			// Verify ConfigMap exists only if not optional
-			if storage.ConfigMap.Optional == nil || !*storage.ConfigMap.Optional {
+			if storage.Source.ConfigMap.Optional == nil || !*storage.Source.ConfigMap.Optional {
 				configMap := &corev1.ConfigMap{}
 				if err := r.Get(ctx, client.ObjectKey{
-					Name:      storage.ConfigMap.Name,
+					Name:      storage.Source.ConfigMap.Name,
 					Namespace: mcpServer.Namespace,
 				}, configMap); err != nil {
-					return nil, fmt.Errorf("failed to get ConfigMap %s for storage mount at index %d: %w", storage.ConfigMap.Name, i, err)
+					return nil, fmt.Errorf("failed to get ConfigMap %s for storage mount at index %d: %w", storage.Source.ConfigMap.Name, i, err)
 				}
 			}
-			volume.ConfigMap = storage.ConfigMap
+			volume.ConfigMap = storage.Source.ConfigMap
 		case mcpv1alpha1.StorageTypeSecret:
-			if storage.Secret == nil {
+			if storage.Source.Secret == nil {
 				return nil, fmt.Errorf("secret must be set when type is Secret for storage mount at index %d", i)
 			}
 			// Validate Secret name is not empty
-			if storage.Secret.SecretName == "" {
+			if storage.Source.Secret.SecretName == "" {
 				return nil, fmt.Errorf("secret name must not be empty for storage mount at index %d", i)
 			}
 			// Verify Secret exists only if not optional
-			if storage.Secret.Optional == nil || !*storage.Secret.Optional {
+			if storage.Source.Secret.Optional == nil || !*storage.Source.Secret.Optional {
 				secret := &corev1.Secret{}
 				if err := r.Get(ctx, client.ObjectKey{
-					Name:      storage.Secret.SecretName,
+					Name:      storage.Source.Secret.SecretName,
 					Namespace: mcpServer.Namespace,
 				}, secret); err != nil {
-					return nil, fmt.Errorf("failed to get Secret %s for storage mount at index %d: %w", storage.Secret.SecretName, i, err)
+					return nil, fmt.Errorf("failed to get Secret %s for storage mount at index %d: %w", storage.Source.Secret.SecretName, i, err)
 				}
 			}
-			volume.Secret = storage.Secret
+			volume.Secret = storage.Source.Secret
 		default:
-			return nil, fmt.Errorf("unsupported storage type %s at index %d", storage.Type, i)
+			return nil, fmt.Errorf("unsupported storage type %s at index %d", storage.Source.Type, i)
 		}
 
 		volumes = append(volumes, volume)
