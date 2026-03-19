@@ -318,7 +318,7 @@ spec:
                     description: |-
                       Storage defines storage mounts for ConfigMaps and Secrets.
                       Each item uses native Kubernetes volume source types for consistency and feature parity.
-                      Maximum 64 items.
+                      If specified, must contain at least 1 item. Maximum 64 items.
                     items:
                       description: |-
                         StorageMount defines a storage mount combining volume source and mount configuration.
@@ -518,6 +518,7 @@ spec:
                       - source
                       type: object
                     maxItems: 64
+                    minItems: 1
                     type: array
                 required:
                 - port

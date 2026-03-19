@@ -187,8 +187,9 @@ type ServerConfig struct {
 
 	// Storage defines storage mounts for ConfigMaps and Secrets.
 	// Each item uses native Kubernetes volume source types for consistency and feature parity.
-	// Maximum 64 items.
+	// If specified, must contain at least 1 item. Maximum 64 items.
 	// +optional
+	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=64
 	Storage []StorageMount `json:"storage,omitempty"`
 
