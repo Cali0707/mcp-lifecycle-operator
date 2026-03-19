@@ -28,4 +28,6 @@ resources:
 - mcpserver_admin_role.yaml
 - mcpserver_editor_role.yaml
 - mcpserver_viewer_role.yaml
+- gateway_role.yaml
+- gateway_role_binding.yaml
 

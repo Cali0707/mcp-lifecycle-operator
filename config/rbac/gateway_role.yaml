@@ -1,0 +1,30 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: mcp-lifecycle-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: manager-gateway-role
+rules:
+- apiGroups:
+  - gateway.networking.k8s.io
+  resources:
+  - httproutes
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - delete
+- apiGroups:
+  - mcp.kagenti.com
+  resources:
+  - mcpserverregistrations
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - delete
