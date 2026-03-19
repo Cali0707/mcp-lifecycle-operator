@@ -450,7 +450,7 @@ func (r *MCPServerReconciler) createDeployment(ctx context.Context, mcpServer *m
 	return deployment, nil
 }
 
-// reconcileService creates the Service for the MCPServer if it doesn't exist.
+// reconcileService creates or updates the Service for the MCPServer.
 func (r *MCPServerReconciler) reconcileService(
 	ctx context.Context,
 	mcpServer *mcpv1alpha1.MCPServer,
@@ -474,8 +474,15 @@ func (r *MCPServerReconciler) reconcileService(
 	} else if err != nil {
 		logger.Error(err, "Failed to get Service")
 		return err
+	} else if !equality.Semantic.DeepEqual(service.Spec.Ports, existingService.Spec.Ports) {
+		logger.Info("Updating Service", "name", existingService.Name)
+		existingService.Spec.Ports = service.Spec.Ports
+		if err := r.Update(ctx, existingService); err != nil {
+			logger.Error(err, "Failed to update Service")
+			return err
+		}
 	} else {
-		logger.Info("Service already exists", "name", service.Name)
+		logger.Info("Service already exists and is up to date", "name", service.Name)
 	}
 
 	return nil
