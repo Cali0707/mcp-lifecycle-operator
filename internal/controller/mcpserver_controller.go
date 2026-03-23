@@ -523,7 +523,9 @@ func (r *MCPServerReconciler) updateStatusFailed(ctx context.Context, mcpServer 
 		Message:            message,
 		ObservedGeneration: mcpServer.Generation,
 	})
-	_ = r.Status().Update(ctx, mcpServer)
+	if err := r.Status().Update(ctx, mcpServer); err != nil {
+		log.FromContext(ctx).Error(err, "Failed to update MCPServer status to Failed")
+	}
 }
 
 // defaultContainerSecurityContext returns the "restricted" Pod Security Standard
