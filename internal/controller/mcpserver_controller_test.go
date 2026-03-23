@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -1241,6 +1242,68 @@ var _ = Describe("MCPServer Controller - reconcileDeployment", func() {
 		deployment, err := reconciler.reconcileDeployment(ctx, mcpServer)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(deployment).NotTo(BeNil())
+	})
+
+	It("should recover when existing deployment has empty containers list", func() {
+		By("Setting up a fake client with a deployment that has no containers")
+		mcpServer := &mcpv1alpha1.MCPServer{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-empty-containers",
+				Namespace: "default",
+				UID:       "fake-uid",
+			},
+			Spec: mcpv1alpha1.MCPServerSpec{
+				Source: mcpv1alpha1.Source{
+					Type: mcpv1alpha1.SourceTypeContainerImage,
+					ContainerImage: &mcpv1alpha1.ContainerImageSource{
+						Ref: "docker.io/library/test-image:latest",
+					},
+				},
+				Config: mcpv1alpha1.ServerConfig{
+					Port: 8080,
+				},
+			},
+		}
+
+		brokenDeployment := &appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-empty-containers",
+				Namespace: "default",
+			},
+			Spec: appsv1.DeploymentSpec{
+				Selector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{"mcp-server": "test-empty-containers"},
+				},
+				Template: corev1.PodTemplateSpec{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							"app":        "mcp-server",
+							"mcp-server": "test-empty-containers",
+						},
+					},
+					Spec: corev1.PodSpec{
+						Containers: nil,
+					},
+				},
+			},
+		}
+
+		fakeClient := fake.NewClientBuilder().
+			WithScheme(k8sClient.Scheme()).
+			WithObjects(mcpServer, brokenDeployment).
+			Build()
+
+		reconciler := &MCPServerReconciler{
+			Client: fakeClient,
+			Scheme: k8sClient.Scheme(),
+		}
+
+		By("Reconciling should not panic and should restore the containers")
+		deployment, err := reconciler.reconcileDeployment(ctx, mcpServer)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(deployment).NotTo(BeNil())
+		Expect(deployment.Spec.Template.Spec.Containers).To(HaveLen(1))
+		Expect(deployment.Spec.Template.Spec.Containers[0].Image).To(Equal("docker.io/library/test-image:latest"))
 	})
 })
 
