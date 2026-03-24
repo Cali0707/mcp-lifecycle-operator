@@ -327,6 +327,33 @@ func (r *MCPServerReconciler) createDeployment(ctx context.Context, mcpServer *m
 		container.Env = mcpServer.Spec.Config.Env
 	}
 	if len(mcpServer.Spec.Config.EnvFrom) > 0 {
+		// Verify referenced ConfigMaps and Secrets exist
+		for i, envFrom := range mcpServer.Spec.Config.EnvFrom {
+			if ref := envFrom.ConfigMapRef; ref != nil {
+				if ref.Optional == nil || !*ref.Optional {
+					configMap := &corev1.ConfigMap{}
+					if err := r.Get(ctx, client.ObjectKey{
+						Name:      ref.Name,
+						Namespace: mcpServer.Namespace,
+					}, configMap); err != nil {
+						return nil, fmt.Errorf("failed to get ConfigMap %s for envFrom at index %d: %w", ref.Name, i, err)
+					}
+				}
+			}
+			if ref := envFrom.SecretRef; ref != nil {
+				if ref.Optional == nil || !*ref.Optional {
+					secret := &corev1.Secret{}
+					if err := r.Get(ctx, client.ObjectKey{
+						Name:      ref.Name,
+						Namespace: mcpServer.Namespace,
+					}, secret); err != nil {
+						return nil, fmt.Errorf("failed to get Secret %s for envFrom at index %d: %w", ref.Name, i, err)
+					}
+				}
+			}
+		}
+
+		// envFrom is valid, let's set it on the container
 		container.EnvFrom = mcpServer.Spec.Config.EnvFrom
 	}
 
