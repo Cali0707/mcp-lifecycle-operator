@@ -691,6 +691,7 @@ var _ = Describe("MCPServer Controller", func() {
 					Config: mcpv1alpha1.ServerConfig{
 						Port: 8080,
 					},
+					// No Runtime section - replicas should default to 1
 				},
 			}
 			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
@@ -861,9 +862,7 @@ var _ = Describe("MCPServer Controller", func() {
 			By("Removing replicas from the MCPServer")
 			mcpServer := &mcpv1alpha1.MCPServer{}
 			Expect(k8sClient.Get(ctx, typeNamespacedName, mcpServer)).To(Succeed())
-			// Remove the entire Runtime config to avoid MinProperties validation error
-			// since RuntimeConfig only had Replicas set
-			mcpServer.Spec.Runtime = mcpv1alpha1.RuntimeConfig{}
+			mcpServer.Spec.Runtime.Replicas = nil
 			Expect(k8sClient.Update(ctx, mcpServer)).To(Succeed())
 
 			By("Reconciling again to pick up the removal")
@@ -1033,6 +1032,9 @@ var _ = Describe("MCPServer Controller - Address URL", func() {
 					Config: mcpv1alpha1.ServerConfig{
 						Port: 8080,
 					},
+					Runtime: mcpv1alpha1.RuntimeConfig{
+						Replicas: ptr.To(int32(1)),
+					},
 				},
 			}
 			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
@@ -1138,6 +1140,9 @@ var _ = Describe("MCPServer Controller - Address URL", func() {
 					},
 					Config: mcpv1alpha1.ServerConfig{
 						Port: 8080,
+					},
+					Runtime: mcpv1alpha1.RuntimeConfig{
+						Replicas: ptr.To(int32(1)),
 					},
 				},
 			}

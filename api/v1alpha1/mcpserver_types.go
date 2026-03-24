@@ -248,6 +248,10 @@ type RuntimeConfig struct {
 	// Replicas is the number of MCP server pod replicas to run.
 	// Defaults to 1 if not specified.
 	// Set to 0 to scale down the deployment.
+	// This field is a pointer (*int32) to distinguish between:
+	//   - nil (not specified) -> defaults to 1 replica
+	//   - ptr.To(0) (explicit 0) -> scale-to-zero
+	// This follows the same pattern as Deployment.Spec.Replicas in k8s.io/api/apps/v1.
 	// +optional
 	// +kubebuilder:validation:Minimum=0
 	Replicas *int32 `json:"replicas,omitempty"`
