@@ -1,0 +1,53 @@
+apiVersion: mcp.x-k8s.io/v1alpha1
+kind: MCPServer
+metadata:
+  name: mcpserver-with-emptydir
+  namespace: default
+spec:
+  source:
+    type: ContainerImage
+    containerImage:
+      ref: docker.io/library/nginx:latest
+  config:
+    port: 8080
+    # EmptyDir volumes provide writable scratch space
+    # Useful when running with readOnlyRootFilesystem: true
+    storage:
+      # EmptyDir for application logs with size limit
+      - path: /app/logs
+        permissions: ReadWrite
+        source:
+          type: EmptyDir
+          emptyDir:
+            sizeLimit: 100Mi
+
+      # EmptyDir for cache with larger size limit
+      - path: /tmp/cache
+        permissions: ReadWrite
+        source:
+          type: EmptyDir
+          emptyDir:
+            sizeLimit: 500Mi
+
+      # Memory-backed emptyDir for temporary in-memory data
+      - path: /tmp/memory
+        permissions: ReadWrite
+        source:
+          type: EmptyDir
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Mi
+
+  # Example: Using emptyDir with readOnlyRootFilesystem
+  # EmptyDir volumes provide writable mount points in an otherwise read-only filesystem
+  runtime:
+    security:
+      securityContext:
+        readOnlyRootFilesystem: true
+        allowPrivilegeEscalation: false
+        runAsNonRoot: true
+        runAsUser: 1000
+        capabilities:
+          drop:
+            - ALL
+    replicas: 1

@@ -26,11 +26,11 @@ import (
 // StorageSourceApplyConfiguration represents a declarative configuration of the StorageSource type for use
 // with apply.
 //
-// StorageSource defines the source of the storage to mount (ConfigMap or Secret).
+// StorageSource defines the source of the storage to mount (ConfigMap, Secret, or EmptyDir).
 type StorageSourceApplyConfiguration struct {
 	// Type is a required field that specifies the type of volume source.
-	// Allowed values are: ConfigMap, Secret.
-	// This determines which volume source field (configMap or secret) should be configured.
+	// Allowed values are: ConfigMap, Secret, EmptyDir.
+	// This determines which volume source field (configMap, secret, or emptyDir) should be configured.
 	Type *apiv1alpha1.StorageType `json:"type,omitempty"`
 	// ConfigMap specifies a ConfigMap volume source (when Type is ConfigMap).
 	// Uses native Kubernetes ConfigMapVolumeSource type for full feature parity.
@@ -38,6 +38,9 @@ type StorageSourceApplyConfiguration struct {
 	// Secret specifies a Secret volume source (when Type is Secret).
 	// Uses native Kubernetes SecretVolumeSource type for full feature parity.
 	Secret *v1.SecretVolumeSource `json:"secret,omitempty"`
+	// EmptyDir specifies an EmptyDir volume source (when Type is EmptyDir).
+	// Uses native Kubernetes EmptyDirVolumeSource type for full feature parity.
+	EmptyDir *v1.EmptyDirVolumeSource `json:"emptyDir,omitempty"`
 }
 
 // StorageSourceApplyConfiguration constructs a declarative configuration of the StorageSource type for use with
@@ -67,5 +70,13 @@ func (b *StorageSourceApplyConfiguration) WithConfigMap(value v1.ConfigMapVolume
 // If called multiple times, the Secret field is set to the value of the last call.
 func (b *StorageSourceApplyConfiguration) WithSecret(value v1.SecretVolumeSource) *StorageSourceApplyConfiguration {
 	b.Secret = &value
+	return b
+}
+
+// WithEmptyDir sets the EmptyDir field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the EmptyDir field is set to the value of the last call.
+func (b *StorageSourceApplyConfiguration) WithEmptyDir(value v1.EmptyDirVolumeSource) *StorageSourceApplyConfiguration {
+	b.EmptyDir = &value
 	return b
 }

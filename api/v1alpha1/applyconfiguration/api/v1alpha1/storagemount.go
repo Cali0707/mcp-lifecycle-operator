@@ -27,7 +27,7 @@ import (
 //
 // StorageMount defines a storage mount combining volume source and mount configuration.
 // The Path and Permissions fields apply to all storage types, while Source contains
-// the type-specific configuration (ConfigMap or Secret).
+// the type-specific configuration (ConfigMap, Secret, or EmptyDir).
 type StorageMountApplyConfiguration struct {
 	// Path is a required field that specifies where the volume should be mounted in the container.
 	// Must be an absolute path (starting with /).
@@ -40,8 +40,9 @@ type StorageMountApplyConfiguration struct {
 	// When set to ReadWrite, the mount is read-write.
 	// When set to RecursiveReadOnly, the mount and all submounts are recursively read-only.
 	// Defaults to ReadOnly for ConfigMap and Secret mounts.
+	// For EmptyDir mounts, ReadWrite is more common for writable scratch space.
 	Permissions *apiv1alpha1.MountPermissions `json:"permissions,omitempty"`
-	// Source defines where the storage data comes from (ConfigMap or Secret).
+	// Source defines where the storage data comes from (ConfigMap, Secret, or EmptyDir).
 	Source *StorageSourceApplyConfiguration `json:"source,omitempty"`
 }
 

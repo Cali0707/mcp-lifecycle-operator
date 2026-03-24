@@ -525,6 +525,12 @@ func (r *MCPServerReconciler) processStorageMounts(
 				}
 			}
 			volume.Secret = storage.Source.Secret
+		case mcpv1alpha1.StorageTypeEmptyDir:
+			if storage.Source.EmptyDir == nil {
+				return nil, nil, fmt.Errorf("emptyDir must be set when type is EmptyDir for storage mount at index %d", i)
+			}
+			// No existence validation needed - EmptyDir is created by Kubernetes
+			volume.EmptyDir = storage.Source.EmptyDir
 		default:
 			return nil, nil, fmt.Errorf("unsupported storage type %s at index %d", storage.Source.Type, i)
 		}

@@ -81,7 +81,7 @@ type Source struct {
 }
 
 // StorageType defines the type of storage mount.
-// +kubebuilder:validation:Enum=ConfigMap;Secret
+// +kubebuilder:validation:Enum=ConfigMap;Secret;EmptyDir
 type StorageType string
 
 const (
@@ -89,6 +89,8 @@ const (
 	StorageTypeConfigMap StorageType = "ConfigMap"
 	// StorageTypeSecret indicates a Secret volume source.
 	StorageTypeSecret StorageType = "Secret"
+	// StorageTypeEmptyDir indicates an EmptyDir volume source.
+	StorageTypeEmptyDir StorageType = "EmptyDir"
 )
 
 // MountPermissions defines the access permissions for a volume mount.
@@ -105,13 +107,14 @@ const (
 	MountPermissionsRecursiveReadOnly MountPermissions = "RecursiveReadOnly"
 )
 
-// StorageSource defines the source of the storage to mount (ConfigMap or Secret).
+// StorageSource defines the source of the storage to mount (ConfigMap, Secret, or EmptyDir).
 // +kubebuilder:validation:XValidation:rule="self.type == 'ConfigMap' ? has(self.configMap) : !has(self.configMap)",message="configMap must be set when type is ConfigMap and must not be set otherwise"
 // +kubebuilder:validation:XValidation:rule="self.type == 'Secret' ? has(self.secret) : !has(self.secret)",message="secret must be set when type is Secret and must not be set otherwise"
+// +kubebuilder:validation:XValidation:rule="self.type == 'EmptyDir' ? has(self.emptyDir) : !has(self.emptyDir)",message="emptyDir must be set when type is EmptyDir and must not be set otherwise"
 type StorageSource struct {
 	// Type is a required field that specifies the type of volume source.
-	// Allowed values are: ConfigMap, Secret.
-	// This determines which volume source field (configMap or secret) should be configured.
+	// Allowed values are: ConfigMap, Secret, EmptyDir.
+	// This determines which volume source field (configMap, secret, or emptyDir) should be configured.
 	// +kubebuilder:validation:Required
 	Type StorageType `json:"type,omitempty"`
 
@@ -124,11 +127,16 @@ type StorageSource struct {
 	// Uses native Kubernetes SecretVolumeSource type for full feature parity.
 	// +optional
 	Secret *corev1.SecretVolumeSource `json:"secret,omitempty"`
+
+	// EmptyDir specifies an EmptyDir volume source (when Type is EmptyDir).
+	// Uses native Kubernetes EmptyDirVolumeSource type for full feature parity.
+	// +optional
+	EmptyDir *corev1.EmptyDirVolumeSource `json:"emptyDir,omitempty"`
 }
 
 // StorageMount defines a storage mount combining volume source and mount configuration.
 // The Path and Permissions fields apply to all storage types, while Source contains
-// the type-specific configuration (ConfigMap or Secret).
+// the type-specific configuration (ConfigMap, Secret, or EmptyDir).
 type StorageMount struct {
 	// Path is a required field that specifies where the volume should be mounted in the container.
 	// Must be an absolute path (starting with /).
@@ -147,11 +155,12 @@ type StorageMount struct {
 	// When set to ReadWrite, the mount is read-write.
 	// When set to RecursiveReadOnly, the mount and all submounts are recursively read-only.
 	// Defaults to ReadOnly for ConfigMap and Secret mounts.
+	// For EmptyDir mounts, ReadWrite is more common for writable scratch space.
 	// +optional
 	// +kubebuilder:default=ReadOnly
 	Permissions MountPermissions `json:"permissions,omitempty"`
 
-	// Source defines where the storage data comes from (ConfigMap or Secret).
+	// Source defines where the storage data comes from (ConfigMap, Secret, or EmptyDir).
 	// +kubebuilder:validation:Required
 	Source StorageSource `json:"source,omitzero"`
 }
@@ -189,7 +198,7 @@ type ServerConfig struct {
 	// +optional
 	EnvFrom []corev1.EnvFromSource `json:"envFrom,omitempty"`
 
-	// Storage defines storage mounts for ConfigMaps and Secrets.
+	// Storage defines storage mounts for ConfigMaps, Secrets, and EmptyDirs.
 	// Each item uses native Kubernetes volume source types for consistency and feature parity.
 	// If specified, must contain at least 1 item. Maximum 64 items.
 	// Each storage mount must have a unique path.

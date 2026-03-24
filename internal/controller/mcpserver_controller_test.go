@@ -2193,6 +2193,290 @@ var _ = Describe("MCPServer Controller - Storage Mounts", func() {
 		})
 	})
 
+	Context("When reconciling a resource with EmptyDir storage", func() {
+		const resourceName = "test-resource-emptydir-storage"
+
+		ctx := context.Background()
+
+		typeNamespacedName := types.NamespacedName{
+			Name:      resourceName,
+			Namespace: "default",
+		}
+
+		BeforeEach(func() {
+			resource := &mcpv1alpha1.MCPServer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      resourceName,
+					Namespace: "default",
+				},
+				Spec: mcpv1alpha1.MCPServerSpec{
+					Source: mcpv1alpha1.Source{
+						Type: mcpv1alpha1.SourceTypeContainerImage,
+						ContainerImage: &mcpv1alpha1.ContainerImageSource{
+							Ref: "docker.io/library/test-image:latest",
+						},
+					},
+					Config: mcpv1alpha1.ServerConfig{
+						Port: 8080,
+						Storage: []mcpv1alpha1.StorageMount{
+							{
+								Path:        "/app/logs",
+								Permissions: mcpv1alpha1.MountPermissionsReadWrite,
+								Source: mcpv1alpha1.StorageSource{
+									Type:     mcpv1alpha1.StorageTypeEmptyDir,
+									EmptyDir: &corev1.EmptyDirVolumeSource{},
+								},
+							},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			resource := &mcpv1alpha1.MCPServer{}
+			err := k8sClient.Get(ctx, typeNamespacedName, resource)
+			if err == nil {
+				Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
+			}
+		})
+
+		It("should create deployment with EmptyDir volume and mount", func() {
+			controllerReconciler := &MCPServerReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: typeNamespacedName,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			deployment := &appsv1.Deployment{}
+			err = k8sClient.Get(ctx, client.ObjectKey{
+				Name:      resourceName,
+				Namespace: "default",
+			}, deployment)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify volume is created with auto-generated name
+			Expect(deployment.Spec.Template.Spec.Volumes).To(HaveLen(1))
+			volume := deployment.Spec.Template.Spec.Volumes[0]
+			Expect(volume.Name).To(Equal("vol-0"))
+			Expect(volume.VolumeSource.EmptyDir).NotTo(BeNil())
+
+			// Verify volume mount is created with ReadWrite permissions
+			container := deployment.Spec.Template.Spec.Containers[0]
+			Expect(container.VolumeMounts).To(HaveLen(1))
+			volumeMount := container.VolumeMounts[0]
+			Expect(volumeMount.Name).To(Equal("vol-0"))
+			Expect(volumeMount.MountPath).To(Equal("/app/logs"))
+			Expect(volumeMount.ReadOnly).To(BeFalse()) // ReadWrite
+		})
+	})
+
+	Context("When reconciling a resource with EmptyDir storage with sizeLimit", func() {
+		const resourceName = "test-resource-emptydir-sizelimit"
+
+		ctx := context.Background()
+
+		typeNamespacedName := types.NamespacedName{
+			Name:      resourceName,
+			Namespace: "default",
+		}
+
+		BeforeEach(func() {
+			sizeLimit := resource.MustParse("100Mi")
+			mcpServer := &mcpv1alpha1.MCPServer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      resourceName,
+					Namespace: "default",
+				},
+				Spec: mcpv1alpha1.MCPServerSpec{
+					Source: mcpv1alpha1.Source{
+						Type: mcpv1alpha1.SourceTypeContainerImage,
+						ContainerImage: &mcpv1alpha1.ContainerImageSource{
+							Ref: "docker.io/library/test-image:latest",
+						},
+					},
+					Config: mcpv1alpha1.ServerConfig{
+						Port: 8080,
+						Storage: []mcpv1alpha1.StorageMount{
+							{
+								Path:        "/tmp/cache",
+								Permissions: mcpv1alpha1.MountPermissionsReadWrite,
+								Source: mcpv1alpha1.StorageSource{
+									Type: mcpv1alpha1.StorageTypeEmptyDir,
+									EmptyDir: &corev1.EmptyDirVolumeSource{
+										SizeLimit: &sizeLimit,
+									},
+								},
+							},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, mcpServer)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			resource := &mcpv1alpha1.MCPServer{}
+			err := k8sClient.Get(ctx, typeNamespacedName, resource)
+			if err == nil {
+				Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
+			}
+		})
+
+		It("should create deployment with EmptyDir volume with sizeLimit", func() {
+			controllerReconciler := &MCPServerReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: typeNamespacedName,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			deployment := &appsv1.Deployment{}
+			err = k8sClient.Get(ctx, client.ObjectKey{
+				Name:      resourceName,
+				Namespace: "default",
+			}, deployment)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify EmptyDir has sizeLimit set
+			volume := deployment.Spec.Template.Spec.Volumes[0]
+			Expect(volume.VolumeSource.EmptyDir).NotTo(BeNil())
+			Expect(volume.VolumeSource.EmptyDir.SizeLimit).NotTo(BeNil())
+			Expect(volume.VolumeSource.EmptyDir.SizeLimit.String()).To(Equal("100Mi"))
+		})
+	})
+
+	Context("When reconciling a resource with mixed storage types including EmptyDir", func() {
+		const resourceName = "test-resource-mixed-storage"
+
+		ctx := context.Background()
+
+		typeNamespacedName := types.NamespacedName{
+			Name:      resourceName,
+			Namespace: "default",
+		}
+
+		BeforeEach(func() {
+			// Create ConfigMap
+			configMap := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-mixed-configmap",
+					Namespace: "default",
+				},
+				Data: map[string]string{
+					"config.yaml": "test: value",
+				},
+			}
+			Expect(k8sClient.Create(ctx, configMap)).To(Succeed())
+
+			mcpServer := &mcpv1alpha1.MCPServer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      resourceName,
+					Namespace: "default",
+				},
+				Spec: mcpv1alpha1.MCPServerSpec{
+					Source: mcpv1alpha1.Source{
+						Type: mcpv1alpha1.SourceTypeContainerImage,
+						ContainerImage: &mcpv1alpha1.ContainerImageSource{
+							Ref: "docker.io/library/test-image:latest",
+						},
+					},
+					Config: mcpv1alpha1.ServerConfig{
+						Port: 8080,
+						Storage: []mcpv1alpha1.StorageMount{
+							{
+								Path: "/etc/config",
+								Source: mcpv1alpha1.StorageSource{
+									Type: mcpv1alpha1.StorageTypeConfigMap,
+									ConfigMap: &corev1.ConfigMapVolumeSource{
+										LocalObjectReference: corev1.LocalObjectReference{
+											Name: "test-mixed-configmap",
+										},
+									},
+								},
+							},
+							{
+								Path:        "/app/logs",
+								Permissions: mcpv1alpha1.MountPermissionsReadWrite,
+								Source: mcpv1alpha1.StorageSource{
+									Type:     mcpv1alpha1.StorageTypeEmptyDir,
+									EmptyDir: &corev1.EmptyDirVolumeSource{},
+								},
+							},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, mcpServer)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			resource := &mcpv1alpha1.MCPServer{}
+			err := k8sClient.Get(ctx, typeNamespacedName, resource)
+			if err == nil {
+				Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
+			}
+			configMap := &corev1.ConfigMap{}
+			err = k8sClient.Get(ctx, client.ObjectKey{Name: "test-mixed-configmap", Namespace: "default"}, configMap)
+			if err == nil {
+				Expect(k8sClient.Delete(ctx, configMap)).To(Succeed())
+			}
+		})
+
+		It("should create deployment with both ConfigMap and EmptyDir volumes", func() {
+			controllerReconciler := &MCPServerReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: typeNamespacedName,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			deployment := &appsv1.Deployment{}
+			err = k8sClient.Get(ctx, client.ObjectKey{
+				Name:      resourceName,
+				Namespace: "default",
+			}, deployment)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify both volumes are created
+			Expect(deployment.Spec.Template.Spec.Volumes).To(HaveLen(2))
+
+			volume0 := deployment.Spec.Template.Spec.Volumes[0]
+			Expect(volume0.Name).To(Equal("vol-0"))
+			Expect(volume0.VolumeSource.ConfigMap).NotTo(BeNil())
+			Expect(volume0.VolumeSource.ConfigMap.Name).To(Equal("test-mixed-configmap"))
+
+			volume1 := deployment.Spec.Template.Spec.Volumes[1]
+			Expect(volume1.Name).To(Equal("vol-1"))
+			Expect(volume1.VolumeSource.EmptyDir).NotTo(BeNil())
+
+			// Verify both volume mounts
+			container := deployment.Spec.Template.Spec.Containers[0]
+			Expect(container.VolumeMounts).To(HaveLen(2))
+
+			volumeMount0 := container.VolumeMounts[0]
+			Expect(volumeMount0.Name).To(Equal("vol-0"))
+			Expect(volumeMount0.MountPath).To(Equal("/etc/config"))
+			Expect(volumeMount0.ReadOnly).To(BeTrue()) // ConfigMap default
+
+			volumeMount1 := container.VolumeMounts[1]
+			Expect(volumeMount1.Name).To(Equal("vol-1"))
+			Expect(volumeMount1.MountPath).To(Equal("/app/logs"))
+			Expect(volumeMount1.ReadOnly).To(BeFalse()) // ReadWrite
+		})
+	})
+
 	Context("When ConfigMap reference doesn't exist", func() {
 		const resourceName = "test-resource-missing-configmap"
 

@@ -322,7 +322,7 @@ spec:
                     type: integer
                   storage:
                     description: |-
-                      Storage defines storage mounts for ConfigMaps and Secrets.
+                      Storage defines storage mounts for ConfigMaps, Secrets, and EmptyDirs.
                       Each item uses native Kubernetes volume source types for consistency and feature parity.
                       If specified, must contain at least 1 item. Maximum 64 items.
                       Each storage mount must have a unique path.
@@ -330,7 +330,7 @@ spec:
                       description: |-
                         StorageMount defines a storage mount combining volume source and mount configuration.
                         The Path and Permissions fields apply to all storage types, while Source contains
-                        the type-specific configuration (ConfigMap or Secret).
+                        the type-specific configuration (ConfigMap, Secret, or EmptyDir).
                       properties:
                         path:
                           description: |-
@@ -356,6 +356,7 @@ spec:
                             When set to ReadWrite, the mount is read-write.
                             When set to RecursiveReadOnly, the mount and all submounts are recursively read-only.
                             Defaults to ReadOnly for ConfigMap and Secret mounts.
+                            For EmptyDir mounts, ReadWrite is more common for writable scratch space.
                           enum:
                           - ReadOnly
                           - ReadWrite
@@ -363,7 +364,7 @@ spec:
                           type: string
                         source:
                           description: Source defines where the storage data comes
-                            from (ConfigMap or Secret).
+                            from (ConfigMap, Secret, or EmptyDir).
                           properties:
                             configMap:
                               description: |-
@@ -435,6 +436,32 @@ spec:
                                   type: boolean
                               type: object
                               x-kubernetes-map-type: atomic
+                            emptyDir:
+                              description: |-
+                                EmptyDir specifies an EmptyDir volume source (when Type is EmptyDir).
+                                Uses native Kubernetes EmptyDirVolumeSource type for full feature parity.
+                              properties:
+                                medium:
+                                  description: |-
+                                    medium represents what type of storage medium should back this directory.
+                                    The default is "" which means to use the node's default medium.
+                                    Must be an empty string (default) or Memory.
+                                    More info: https://kubernetes.io/docs/concepts/storage/volumes#emptydir
+                                  type: string
+                                sizeLimit:
+                                  anyOf:
+                                  - type: integer
+                                  - type: string
+                                  description: |-
+                                    sizeLimit is the total amount of local storage required for this EmptyDir volume.
+                                    The size limit is also applicable for memory medium.
+                                    The maximum usage on memory medium EmptyDir would be the minimum value between
+                                    the SizeLimit specified here and the sum of memory limits of all containers in a pod.
+                                    The default is nil which means that the limit is undefined.
+                                    More info: https://kubernetes.io/docs/concepts/storage/volumes#emptydir
+                                  pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                                  x-kubernetes-int-or-string: true
+                              type: object
                             secret:
                               description: |-
                                 Secret specifies a Secret volume source (when Type is Secret).
@@ -503,11 +530,12 @@ spec:
                             type:
                               description: |-
                                 Type is a required field that specifies the type of volume source.
-                                Allowed values are: ConfigMap, Secret.
-                                This determines which volume source field (configMap or secret) should be configured.
+                                Allowed values are: ConfigMap, Secret, EmptyDir.
+                                This determines which volume source field (configMap, secret, or emptyDir) should be configured.
                               enum:
                               - ConfigMap
                               - Secret
+                              - EmptyDir
                               type: string
                           required:
                           - type
@@ -520,6 +548,10 @@ spec:
                           - message: secret must be set when type is Secret and must
                               not be set otherwise
                             rule: 'self.type == ''Secret'' ? has(self.secret) : !has(self.secret)'
+                          - message: emptyDir must be set when type is EmptyDir and
+                              must not be set otherwise
+                            rule: 'self.type == ''EmptyDir'' ? has(self.emptyDir)
+                              : !has(self.emptyDir)'
                       required:
                       - path
                       - source
