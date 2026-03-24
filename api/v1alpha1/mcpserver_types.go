@@ -241,7 +241,11 @@ type SecurityConfig struct {
 	SecurityContext *corev1.SecurityContext `json:"securityContext,omitempty"`
 }
 
-// RuntimeConfig defines runtime management configuration for the MCP server.
+// RuntimeConfig defines runtime execution configuration for the MCP server.
+//
+// This section covers how the MCP server executes and behaves at runtime,
+// including replicas, security, and resource allocation.
+//
 // If not specified, default runtime settings will be applied.
 // See individual field documentation for specific defaults.
 type RuntimeConfig struct {
@@ -260,6 +264,21 @@ type RuntimeConfig struct {
 	// If not specified, default security settings will be applied.
 	// +optional
 	Security SecurityConfig `json:"security,omitzero"`
+
+	// Resources defines the resource requirements for the MCP server container.
+	// This includes CPU and memory requests and limits.
+	// If not specified, the container will run without explicit resource constraints.
+	// Supports partial specification (e.g., only requests or only limits).
+	// Example:
+	//   resources:
+	//     requests:
+	//       cpu: "100m"
+	//       memory: "256Mi"
+	//     limits:
+	//       cpu: "500m"
+	//       memory: "512Mi"
+	// +optional
+	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
 }
 
 // MCPServerSpec defines the desired state of MCPServer.
