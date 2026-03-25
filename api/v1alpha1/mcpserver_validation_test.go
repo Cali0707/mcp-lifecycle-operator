@@ -932,10 +932,10 @@ var _ = Describe("MCPServer Validation", func() {
 	})
 
 	Context("RuntimeConfig validation", func() {
-		It("should accept empty RuntimeConfig (runtime: {})", func() {
+		It("should accept omitted RuntimeConfig (defaults will be applied)", func() {
 			mcpServer := &MCPServer{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "valid-empty-runtime",
+					Name:      "valid-omitted-runtime",
 					Namespace: namespace.Name,
 				},
 				Spec: MCPServerSpec{
@@ -948,7 +948,8 @@ var _ = Describe("MCPServer Validation", func() {
 					Config: ServerConfig{
 						Port: 8080,
 					},
-					Runtime: RuntimeConfig{}, // Valid: empty struct with zero values
+					// Runtime is omitted entirely - valid because defaults will be applied
+					Runtime: RuntimeConfig{}, // With omitzero tag, this gets omitted from JSON
 				},
 			}
 			Expect(k8sClient.Create(ctx, mcpServer)).To(Succeed())

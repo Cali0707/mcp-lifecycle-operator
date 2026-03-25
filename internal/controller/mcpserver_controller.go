@@ -262,6 +262,7 @@ func (r *MCPServerReconciler) reconcileDeployment(
 			!equality.Semantic.DeepEqual(oldPodSpec.SecurityContext, newPodSpec.SecurityContext) ||
 			!equality.Semantic.DeepEqual(oldPodSpec.Volumes, newPodSpec.Volumes) ||
 			!equality.Semantic.DeepEqual(oldPodSpec.Containers[0].VolumeMounts, newPodSpec.Containers[0].VolumeMounts) ||
+			!equality.Semantic.DeepEqual(oldPodSpec.Containers[0].Resources, newPodSpec.Containers[0].Resources) ||
 			oldPodSpec.ServiceAccountName != newPodSpec.ServiceAccountName ||
 			!equality.Semantic.DeepEqual(existingDeployment.Spec.Replicas, deployment.Spec.Replicas)
 	}
@@ -334,6 +335,11 @@ func (r *MCPServerReconciler) createDeployment(ctx context.Context, mcpServer *m
 		container.SecurityContext = mcpServer.Spec.Runtime.Security.SecurityContext
 	} else {
 		container.SecurityContext = defaultContainerSecurityContext()
+	}
+
+	// Apply resource requirements if specified
+	if mcpServer.Spec.Runtime.Resources != nil {
+		container.Resources = *mcpServer.Spec.Runtime.Resources
 	}
 
 	// Process storage mounts from the new Storage API
