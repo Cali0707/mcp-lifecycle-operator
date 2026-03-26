@@ -27,6 +27,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
@@ -921,6 +922,16 @@ var _ = Describe("MCPServer Controller", func() {
 					},
 				},
 			}
+			// Create the referenced Secret and ConfigMap so envFrom validation passes
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: "my-secret", Namespace: "default"},
+			}
+			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+			configMap := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{Name: "my-configmap", Namespace: "default"},
+			}
+			Expect(k8sClient.Create(ctx, configMap)).To(Succeed())
+
 			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 		})
 
@@ -929,6 +940,14 @@ var _ = Describe("MCPServer Controller", func() {
 			err := k8sClient.Get(ctx, typeNamespacedName, resource)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
+
+			// Clean up the referenced Secret and ConfigMap
+			Expect(k8sClient.Delete(ctx, &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: "my-secret", Namespace: "default"},
+			})).To(Succeed())
+			Expect(k8sClient.Delete(ctx, &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{Name: "my-configmap", Namespace: "default"},
+			})).To(Succeed())
 		})
 
 		It("should propagate envFrom to the deployment", func() {
@@ -996,6 +1015,203 @@ var _ = Describe("MCPServer Controller", func() {
 		})
 	})
 
+	Context("When reconciling a resource with a missing envFrom reference", func() {
+		const resourceName = "test-resource-envfrom-missing"
+
+		typeNamespacedName := types.NamespacedName{
+			Name:      resourceName,
+			Namespace: "default",
+		}
+
+		BeforeEach(func() {
+			resource := &mcpv1alpha1.MCPServer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      resourceName,
+					Namespace: "default",
+				},
+				Spec: mcpv1alpha1.MCPServerSpec{
+					Source: mcpv1alpha1.Source{
+						Type: mcpv1alpha1.SourceTypeContainerImage,
+						ContainerImage: &mcpv1alpha1.ContainerImageSource{
+							Ref: "docker.io/library/test-image:latest",
+						},
+					},
+					Config: mcpv1alpha1.ServerConfig{
+						Port: 8080,
+						EnvFrom: []corev1.EnvFromSource{
+							{
+								ConfigMapRef: &corev1.ConfigMapEnvSource{
+									LocalObjectReference: corev1.LocalObjectReference{Name: "nonexistent-configmap"},
+								},
+							},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			resource := &mcpv1alpha1.MCPServer{}
+			err := k8sClient.Get(ctx, typeNamespacedName, resource)
+			if err == nil {
+				Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
+			}
+		})
+
+		It("should fail reconciliation and set status to Failed when envFrom references a missing ConfigMap", func() {
+			controllerReconciler := &MCPServerReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: typeNamespacedName,
+			})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("failed to get ConfigMap nonexistent-configmap for envFrom"))
+
+			// Verify no Deployment was created
+			deployment := &appsv1.Deployment{}
+			err = k8sClient.Get(ctx, client.ObjectKey{
+				Name:      resourceName,
+				Namespace: "default",
+			}, deployment)
+			Expect(errors.IsNotFound(err)).To(BeTrue())
+
+			// Verify MCPServer status is Failed with the correct condition
+			mcpServer := &mcpv1alpha1.MCPServer{}
+			Expect(k8sClient.Get(ctx, typeNamespacedName, mcpServer)).To(Succeed())
+			Expect(mcpServer.Status.Phase).To(Equal("Failed"))
+			readyCondition := meta.FindStatusCondition(mcpServer.Status.Conditions, "Ready")
+			Expect(readyCondition).NotTo(BeNil())
+			Expect(readyCondition.Status).To(Equal(metav1.ConditionFalse))
+			Expect(readyCondition.Reason).To(Equal("ReconciliationFailed"))
+		})
+
+		It("should skip validation when envFrom reference is optional", func() {
+			mcpServer := &mcpv1alpha1.MCPServer{}
+			Expect(k8sClient.Get(ctx, typeNamespacedName, mcpServer)).To(Succeed())
+			optional := true
+			mcpServer.Spec.Config.EnvFrom[0].ConfigMapRef.Optional = &optional
+			Expect(k8sClient.Update(ctx, mcpServer)).To(Succeed())
+
+			controllerReconciler := &MCPServerReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: typeNamespacedName,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			deployment := &appsv1.Deployment{}
+			Expect(k8sClient.Get(ctx, client.ObjectKey{
+				Name:      resourceName,
+				Namespace: "default",
+			}, deployment)).To(Succeed())
+		})
+	})
+
+	Context("When reconciling a resource with a missing envFrom Secret reference", func() {
+		const resourceName = "test-resource-envfrom-missing-secret"
+
+		typeNamespacedName := types.NamespacedName{
+			Name:      resourceName,
+			Namespace: "default",
+		}
+
+		BeforeEach(func() {
+			resource := &mcpv1alpha1.MCPServer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      resourceName,
+					Namespace: "default",
+				},
+				Spec: mcpv1alpha1.MCPServerSpec{
+					Source: mcpv1alpha1.Source{
+						Type: mcpv1alpha1.SourceTypeContainerImage,
+						ContainerImage: &mcpv1alpha1.ContainerImageSource{
+							Ref: "docker.io/library/test-image:latest",
+						},
+					},
+					Config: mcpv1alpha1.ServerConfig{
+						Port: 8080,
+						EnvFrom: []corev1.EnvFromSource{
+							{
+								SecretRef: &corev1.SecretEnvSource{
+									LocalObjectReference: corev1.LocalObjectReference{Name: "nonexistent-secret"},
+								},
+							},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			resource := &mcpv1alpha1.MCPServer{}
+			err := k8sClient.Get(ctx, typeNamespacedName, resource)
+			if err == nil {
+				Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
+			}
+		})
+
+		It("should fail reconciliation and set status to Failed when envFrom references a missing Secret", func() {
+			controllerReconciler := &MCPServerReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: typeNamespacedName,
+			})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("failed to get Secret nonexistent-secret for envFrom"))
+
+			// Verify no Deployment was created
+			deployment := &appsv1.Deployment{}
+			err = k8sClient.Get(ctx, client.ObjectKey{
+				Name:      resourceName,
+				Namespace: "default",
+			}, deployment)
+			Expect(errors.IsNotFound(err)).To(BeTrue())
+
+			// Verify MCPServer status is Failed with the correct condition
+			mcpServer := &mcpv1alpha1.MCPServer{}
+			Expect(k8sClient.Get(ctx, typeNamespacedName, mcpServer)).To(Succeed())
+			Expect(mcpServer.Status.Phase).To(Equal("Failed"))
+			readyCondition := meta.FindStatusCondition(mcpServer.Status.Conditions, "Ready")
+			Expect(readyCondition).NotTo(BeNil())
+			Expect(readyCondition.Status).To(Equal(metav1.ConditionFalse))
+			Expect(readyCondition.Reason).To(Equal("ReconciliationFailed"))
+		})
+
+		It("should skip validation when envFrom Secret reference is optional", func() {
+			mcpServer := &mcpv1alpha1.MCPServer{}
+			Expect(k8sClient.Get(ctx, typeNamespacedName, mcpServer)).To(Succeed())
+			optional := true
+			mcpServer.Spec.Config.EnvFrom[0].SecretRef.Optional = &optional
+			Expect(k8sClient.Update(ctx, mcpServer)).To(Succeed())
+
+			controllerReconciler := &MCPServerReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: typeNamespacedName,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			deployment := &appsv1.Deployment{}
+			Expect(k8sClient.Get(ctx, client.ObjectKey{
+				Name:      resourceName,
+				Namespace: "default",
+			}, deployment)).To(Succeed())
+		})
+	})
 })
 
 var _ = Describe("MCPServer Controller - Address URL", func() {
