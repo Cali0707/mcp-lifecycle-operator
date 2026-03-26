@@ -59,6 +59,8 @@ spec:
         args:
           - --leader-elect
           - --health-probe-bind-address=:8081
+          # Uncomment to enable development-style logging (human-readable, debug level):
+          # - --zap-devel
         image: controller:latest
         name: manager
         ports: []
