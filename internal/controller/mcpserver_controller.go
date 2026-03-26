@@ -284,6 +284,8 @@ func (r *MCPServerReconciler) reconcileDeployment(
 			!equality.Semantic.DeepEqual(oldPodSpec.Volumes, newPodSpec.Volumes) ||
 			!equality.Semantic.DeepEqual(oldPodSpec.Containers[0].VolumeMounts, newPodSpec.Containers[0].VolumeMounts) ||
 			!equality.Semantic.DeepEqual(oldPodSpec.Containers[0].Resources, newPodSpec.Containers[0].Resources) ||
+			!equality.Semantic.DeepEqual(oldPodSpec.Containers[0].LivenessProbe, newPodSpec.Containers[0].LivenessProbe) ||
+			!equality.Semantic.DeepEqual(oldPodSpec.Containers[0].ReadinessProbe, newPodSpec.Containers[0].ReadinessProbe) ||
 			oldPodSpec.ServiceAccountName != newPodSpec.ServiceAccountName ||
 			!equality.Semantic.DeepEqual(existingDeployment.Spec.Replicas, deployment.Spec.Replicas)
 	}
@@ -364,6 +366,18 @@ func (r *MCPServerReconciler) createDeployment(ctx context.Context, mcpServer *m
 	// Apply resource requirements if specified
 	if mcpServer.Spec.Runtime.Resources != nil {
 		container.Resources = *mcpServer.Spec.Runtime.Resources
+	}
+
+	// Apply health probes if specified.
+	// The probes are passed directly to the container spec without any transformation,
+	// providing full compatibility with the Kubernetes Probe API. This allows users to
+	// configure all probe types (httpGet, tcpSocket, exec, grpc) and all parameters
+	// (delays, periods, thresholds) using standard Kubernetes probe configuration.
+	if mcpServer.Spec.Runtime.Health.LivenessProbe != nil {
+		container.LivenessProbe = mcpServer.Spec.Runtime.Health.LivenessProbe
+	}
+	if mcpServer.Spec.Runtime.Health.ReadinessProbe != nil {
+		container.ReadinessProbe = mcpServer.Spec.Runtime.Health.ReadinessProbe
 	}
 
 	// Process storage mounts

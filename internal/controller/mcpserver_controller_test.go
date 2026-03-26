@@ -31,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -3085,6 +3086,334 @@ var _ = Describe("MCPServer Controller - Storage Mounts", func() {
 			Expect(applyCallCount).To(BeNumerically(">", 0), "expected status updates to use SubResourceApply (SSA)")
 			Expect(updateCalled).To(BeFalse(), "status should not use SubResourceUpdate")
 			Expect(patchCalled).To(BeFalse(), "status should not use SubResourcePatch")
+		})
+	})
+
+	Context("When reconciling a resource with health probes", func() {
+		const resourceName = "test-resource-probes"
+
+		ctx := context.Background()
+
+		typeNamespacedName := types.NamespacedName{
+			Name:      resourceName,
+			Namespace: "default",
+		}
+
+		BeforeEach(func() {
+			mcpServer := &mcpv1alpha1.MCPServer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      resourceName,
+					Namespace: "default",
+				},
+				Spec: mcpv1alpha1.MCPServerSpec{
+					Source: mcpv1alpha1.Source{
+						Type: mcpv1alpha1.SourceTypeContainerImage,
+						ContainerImage: &mcpv1alpha1.ContainerImageSource{
+							Ref: "docker.io/library/test-image:latest",
+						},
+					},
+					Config: mcpv1alpha1.ServerConfig{
+						Port: 8080,
+					},
+					Runtime: mcpv1alpha1.RuntimeConfig{
+						Health: mcpv1alpha1.HealthConfig{
+							LivenessProbe: &corev1.Probe{
+								ProbeHandler: corev1.ProbeHandler{
+									HTTPGet: &corev1.HTTPGetAction{
+										Path: "/health",
+										Port: intstr.FromInt(8080),
+									},
+								},
+								InitialDelaySeconds: 10,
+								PeriodSeconds:       30,
+							},
+							ReadinessProbe: &corev1.Probe{
+								ProbeHandler: corev1.ProbeHandler{
+									TCPSocket: &corev1.TCPSocketAction{
+										Port: intstr.FromInt(8080),
+									},
+								},
+								InitialDelaySeconds: 5,
+								PeriodSeconds:       10,
+							},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, mcpServer)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			mcpServer := &mcpv1alpha1.MCPServer{}
+			err := k8sClient.Get(ctx, typeNamespacedName, mcpServer)
+			if err == nil {
+				Expect(k8sClient.Delete(ctx, mcpServer)).To(Succeed())
+			}
+		})
+
+		It("should create deployment with health probes", func() {
+			controllerReconciler := &MCPServerReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: typeNamespacedName,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			deployment := &appsv1.Deployment{}
+			err = k8sClient.Get(ctx, client.ObjectKey{
+				Name:      resourceName,
+				Namespace: "default",
+			}, deployment)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(deployment.Spec.Template.Spec.Containers).To(HaveLen(1))
+
+			// Verify liveness probe
+			Expect(deployment.Spec.Template.Spec.Containers[0].LivenessProbe).NotTo(BeNil())
+			Expect(deployment.Spec.Template.Spec.Containers[0].LivenessProbe.HTTPGet).NotTo(BeNil())
+			Expect(deployment.Spec.Template.Spec.Containers[0].LivenessProbe.HTTPGet.Path).To(Equal("/health"))
+			Expect(deployment.Spec.Template.Spec.Containers[0].LivenessProbe.HTTPGet.Port.IntVal).To(Equal(int32(8080)))
+			Expect(deployment.Spec.Template.Spec.Containers[0].LivenessProbe.InitialDelaySeconds).To(Equal(int32(10)))
+			Expect(deployment.Spec.Template.Spec.Containers[0].LivenessProbe.PeriodSeconds).To(Equal(int32(30)))
+
+			// Verify readiness probe
+			Expect(deployment.Spec.Template.Spec.Containers[0].ReadinessProbe).NotTo(BeNil())
+			Expect(deployment.Spec.Template.Spec.Containers[0].ReadinessProbe.TCPSocket).NotTo(BeNil())
+			Expect(deployment.Spec.Template.Spec.Containers[0].ReadinessProbe.TCPSocket.Port.IntVal).To(Equal(int32(8080)))
+			Expect(deployment.Spec.Template.Spec.Containers[0].ReadinessProbe.InitialDelaySeconds).To(Equal(int32(5)))
+			Expect(deployment.Spec.Template.Spec.Containers[0].ReadinessProbe.PeriodSeconds).To(Equal(int32(10)))
+		})
+
+		It("should update deployment when probes change", func() {
+			controllerReconciler := &MCPServerReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			By("Reconciling to create the initial deployment with probes")
+			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: typeNamespacedName,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			deployment := &appsv1.Deployment{}
+			err = k8sClient.Get(ctx, client.ObjectKey{
+				Name:      resourceName,
+				Namespace: "default",
+			}, deployment)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(deployment.Spec.Template.Spec.Containers[0].LivenessProbe.InitialDelaySeconds).To(Equal(int32(10)))
+
+			By("Updating probes")
+			mcpServer := &mcpv1alpha1.MCPServer{}
+			Expect(k8sClient.Get(ctx, typeNamespacedName, mcpServer)).To(Succeed())
+			mcpServer.Spec.Runtime.Health.LivenessProbe = &corev1.Probe{
+				ProbeHandler: corev1.ProbeHandler{
+					HTTPGet: &corev1.HTTPGetAction{
+						Path: "/healthz",
+						Port: intstr.FromInt(8080),
+					},
+				},
+				InitialDelaySeconds: 15,
+				PeriodSeconds:       60,
+			}
+			mcpServer.Spec.Runtime.Health.ReadinessProbe = &corev1.Probe{
+				ProbeHandler: corev1.ProbeHandler{
+					HTTPGet: &corev1.HTTPGetAction{
+						Path: "/ready",
+						Port: intstr.FromInt(8080),
+					},
+				},
+				InitialDelaySeconds: 3,
+				PeriodSeconds:       5,
+			}
+			Expect(k8sClient.Update(ctx, mcpServer)).To(Succeed())
+
+			By("Reconciling again to pick up the change")
+			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: typeNamespacedName,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			err = k8sClient.Get(ctx, client.ObjectKey{
+				Name:      resourceName,
+				Namespace: "default",
+			}, deployment)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify updated liveness probe
+			Expect(deployment.Spec.Template.Spec.Containers[0].LivenessProbe.HTTPGet.Path).To(Equal("/healthz"))
+			Expect(deployment.Spec.Template.Spec.Containers[0].LivenessProbe.InitialDelaySeconds).To(Equal(int32(15)))
+			Expect(deployment.Spec.Template.Spec.Containers[0].LivenessProbe.PeriodSeconds).To(Equal(int32(60)))
+
+			// Verify updated readiness probe
+			Expect(deployment.Spec.Template.Spec.Containers[0].ReadinessProbe.HTTPGet).NotTo(BeNil())
+			Expect(deployment.Spec.Template.Spec.Containers[0].ReadinessProbe.HTTPGet.Path).To(Equal("/ready"))
+			Expect(deployment.Spec.Template.Spec.Containers[0].ReadinessProbe.InitialDelaySeconds).To(Equal(int32(3)))
+			Expect(deployment.Spec.Template.Spec.Containers[0].ReadinessProbe.PeriodSeconds).To(Equal(int32(5)))
+		})
+
+		It("should update deployment when probes are removed", func() {
+			controllerReconciler := &MCPServerReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			By("Reconciling to create the initial deployment with probes")
+			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: typeNamespacedName,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			deployment := &appsv1.Deployment{}
+			err = k8sClient.Get(ctx, client.ObjectKey{
+				Name:      resourceName,
+				Namespace: "default",
+			}, deployment)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(deployment.Spec.Template.Spec.Containers[0].LivenessProbe).NotTo(BeNil())
+
+			By("Removing probes")
+			mcpServer := &mcpv1alpha1.MCPServer{}
+			Expect(k8sClient.Get(ctx, typeNamespacedName, mcpServer)).To(Succeed())
+			mcpServer.Spec.Runtime.Health.LivenessProbe = nil
+			mcpServer.Spec.Runtime.Health.ReadinessProbe = nil
+			Expect(k8sClient.Update(ctx, mcpServer)).To(Succeed())
+
+			By("Reconciling again to pick up the change")
+			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: typeNamespacedName,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			err = k8sClient.Get(ctx, client.ObjectKey{
+				Name:      resourceName,
+				Namespace: "default",
+			}, deployment)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(deployment.Spec.Template.Spec.Containers[0].LivenessProbe).To(BeNil())
+			Expect(deployment.Spec.Template.Spec.Containers[0].ReadinessProbe).To(BeNil())
+		})
+
+		It("should handle only liveness probe (no readiness)", func() {
+			mcpServer := &mcpv1alpha1.MCPServer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-only-liveness",
+					Namespace: "default",
+				},
+				Spec: mcpv1alpha1.MCPServerSpec{
+					Source: mcpv1alpha1.Source{
+						Type: mcpv1alpha1.SourceTypeContainerImage,
+						ContainerImage: &mcpv1alpha1.ContainerImageSource{
+							Ref: "docker.io/library/test-image:latest",
+						},
+					},
+					Config: mcpv1alpha1.ServerConfig{
+						Port: 8080,
+					},
+					Runtime: mcpv1alpha1.RuntimeConfig{
+						Health: mcpv1alpha1.HealthConfig{
+							LivenessProbe: &corev1.Probe{
+								ProbeHandler: corev1.ProbeHandler{
+									HTTPGet: &corev1.HTTPGetAction{
+										Path: "/health",
+										Port: intstr.FromInt(8080),
+									},
+								},
+								InitialDelaySeconds: 10,
+							},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, mcpServer)).To(Succeed())
+			defer func() {
+				err := k8sClient.Get(ctx, client.ObjectKey{Name: "test-only-liveness", Namespace: "default"}, mcpServer)
+				if err == nil {
+					Expect(k8sClient.Delete(ctx, mcpServer)).To(Succeed())
+				}
+			}()
+
+			controllerReconciler := &MCPServerReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: "test-only-liveness", Namespace: "default"},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			deployment := &appsv1.Deployment{}
+			err = k8sClient.Get(ctx, client.ObjectKey{
+				Name:      "test-only-liveness",
+				Namespace: "default",
+			}, deployment)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(deployment.Spec.Template.Spec.Containers[0].LivenessProbe).NotTo(BeNil())
+			Expect(deployment.Spec.Template.Spec.Containers[0].LivenessProbe.HTTPGet).NotTo(BeNil())
+			Expect(deployment.Spec.Template.Spec.Containers[0].ReadinessProbe).To(BeNil())
+		})
+
+		It("should handle only readiness probe (no liveness)", func() {
+			mcpServer := &mcpv1alpha1.MCPServer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-only-readiness",
+					Namespace: "default",
+				},
+				Spec: mcpv1alpha1.MCPServerSpec{
+					Source: mcpv1alpha1.Source{
+						Type: mcpv1alpha1.SourceTypeContainerImage,
+						ContainerImage: &mcpv1alpha1.ContainerImageSource{
+							Ref: "docker.io/library/test-image:latest",
+						},
+					},
+					Config: mcpv1alpha1.ServerConfig{
+						Port: 8080,
+					},
+					Runtime: mcpv1alpha1.RuntimeConfig{
+						Health: mcpv1alpha1.HealthConfig{
+							ReadinessProbe: &corev1.Probe{
+								ProbeHandler: corev1.ProbeHandler{
+									TCPSocket: &corev1.TCPSocketAction{
+										Port: intstr.FromInt(8080),
+									},
+								},
+								InitialDelaySeconds: 5,
+							},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, mcpServer)).To(Succeed())
+			defer func() {
+				err := k8sClient.Get(ctx, client.ObjectKey{Name: "test-only-readiness", Namespace: "default"}, mcpServer)
+				if err == nil {
+					Expect(k8sClient.Delete(ctx, mcpServer)).To(Succeed())
+				}
+			}()
+
+			controllerReconciler := &MCPServerReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: "test-only-readiness", Namespace: "default"},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			deployment := &appsv1.Deployment{}
+			err = k8sClient.Get(ctx, client.ObjectKey{
+				Name:      "test-only-readiness",
+				Namespace: "default",
+			}, deployment)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(deployment.Spec.Template.Spec.Containers[0].LivenessProbe).To(BeNil())
+			Expect(deployment.Spec.Template.Spec.Containers[0].ReadinessProbe).NotTo(BeNil())
+			Expect(deployment.Spec.Template.Spec.Containers[0].ReadinessProbe.TCPSocket).NotTo(BeNil())
 		})
 	})
 })

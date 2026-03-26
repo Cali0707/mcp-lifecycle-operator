@@ -28,7 +28,7 @@ import (
 // RuntimeConfig defines runtime execution configuration for the MCP server.
 //
 // This section covers how the MCP server executes and behaves at runtime,
-// including replicas, security, and resource allocation.
+// including replicas, security, resource allocation, and health probes.
 //
 // If not specified, default runtime settings will be applied.
 // See individual field documentation for specific defaults.
@@ -57,6 +57,9 @@ type RuntimeConfigApplyConfiguration struct {
 	// cpu: "500m"
 	// memory: "512Mi"
 	Resources *v1.ResourceRequirements `json:"resources,omitempty"`
+	// Health defines health check configuration for the MCP server.
+	// If not specified, no health probes will be configured.
+	Health *HealthConfigApplyConfiguration `json:"health,omitempty"`
 }
 
 // RuntimeConfigApplyConfiguration constructs a declarative configuration of the RuntimeConfig type for use with
@@ -86,5 +89,13 @@ func (b *RuntimeConfigApplyConfiguration) WithSecurity(value *SecurityConfigAppl
 // If called multiple times, the Resources field is set to the value of the last call.
 func (b *RuntimeConfigApplyConfiguration) WithResources(value v1.ResourceRequirements) *RuntimeConfigApplyConfiguration {
 	b.Resources = &value
+	return b
+}
+
+// WithHealth sets the Health field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Health field is set to the value of the last call.
+func (b *RuntimeConfigApplyConfiguration) WithHealth(value *HealthConfigApplyConfiguration) *RuntimeConfigApplyConfiguration {
+	b.Health = value
 	return b
 }

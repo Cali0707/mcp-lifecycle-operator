@@ -34,6 +34,8 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 	// Group=mcp.x-k8s.io, Version=v1alpha1
 	case v1alpha1.SchemeGroupVersion.WithKind("ContainerImageSource"):
 		return &apiv1alpha1.ContainerImageSourceApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("HealthConfig"):
+		return &apiv1alpha1.HealthConfigApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("MCPServer"):
 		return &apiv1alpha1.MCPServerApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("MCPServerAddress"):

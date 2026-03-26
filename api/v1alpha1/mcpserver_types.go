@@ -244,10 +244,41 @@ type SecurityConfig struct {
 	SecurityContext *corev1.SecurityContext `json:"securityContext,omitempty"`
 }
 
+// HealthConfig defines health check configuration for the MCP server.
+// If not specified, no health probes will be configured.
+//
+// The probes are passed directly to the Deployment's container spec without any
+// transformation, providing full access to the Kubernetes Probe API. This includes
+// all probe types (httpGet, tcpSocket, exec, grpc) and all configuration options
+// (initialDelaySeconds, periodSeconds, timeoutSeconds, successThreshold, failureThreshold).
+//
+// +kubebuilder:validation:MinProperties=1
+type HealthConfig struct {
+	// LivenessProbe defines the liveness probe for the MCP server container.
+	// Kubernetes uses liveness probes to know when to restart a container.
+	// If not specified, no liveness probe will be configured.
+	//
+	// This probe is passed directly to the container spec without transformation,
+	// providing full compatibility with the Kubernetes Probe API.
+	//
+	// +optional
+	LivenessProbe *corev1.Probe `json:"livenessProbe,omitempty"`
+
+	// ReadinessProbe defines the readiness probe for the MCP server container.
+	// Kubernetes uses readiness probes to know when a container is ready to start accepting traffic.
+	// If not specified, no readiness probe will be configured.
+	//
+	// This probe is passed directly to the container spec without transformation,
+	// providing full compatibility with the Kubernetes Probe API.
+	//
+	// +optional
+	ReadinessProbe *corev1.Probe `json:"readinessProbe,omitempty"`
+}
+
 // RuntimeConfig defines runtime execution configuration for the MCP server.
 //
 // This section covers how the MCP server executes and behaves at runtime,
-// including replicas, security, and resource allocation.
+// including replicas, security, resource allocation, and health probes.
 //
 // If not specified, default runtime settings will be applied.
 // See individual field documentation for specific defaults.
@@ -283,6 +314,11 @@ type RuntimeConfig struct {
 	//       memory: "512Mi"
 	// +optional
 	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
+
+	// Health defines health check configuration for the MCP server.
+	// If not specified, no health probes will be configured.
+	// +optional
+	Health HealthConfig `json:"health,omitzero"`
 }
 
 // MCPServerSpec defines the desired state of MCPServer.
