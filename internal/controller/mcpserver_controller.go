@@ -274,10 +274,12 @@ func (r *MCPServerReconciler) reconcileDeployment(
 		needsUpdate = true
 	} else {
 		needsUpdate = !equality.Semantic.DeepDerivative(newPodSpec, oldPodSpec) ||
+			// Explicit DeepEqual checks for fields that can be zeroed/removed by the user.
+			// DeepDerivative skips zero-value fields in the desired spec, so removals
+			// (clearing args, env, volumes, etc.) would go undetected without these.
 			!equality.Semantic.DeepEqual(oldPodSpec.Containers[0].Args, newPodSpec.Containers[0].Args) ||
 			!equality.Semantic.DeepEqual(oldPodSpec.Containers[0].Env, newPodSpec.Containers[0].Env) ||
 			!equality.Semantic.DeepEqual(oldPodSpec.Containers[0].EnvFrom, newPodSpec.Containers[0].EnvFrom) ||
-			!equality.Semantic.DeepEqual(oldPodSpec.Containers[0].SecurityContext, newPodSpec.Containers[0].SecurityContext) ||
 			!equality.Semantic.DeepEqual(oldPodSpec.SecurityContext, newPodSpec.SecurityContext) ||
 			!equality.Semantic.DeepEqual(oldPodSpec.Volumes, newPodSpec.Volumes) ||
 			!equality.Semantic.DeepEqual(oldPodSpec.Containers[0].VolumeMounts, newPodSpec.Containers[0].VolumeMounts) ||
