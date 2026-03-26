@@ -929,6 +929,51 @@ var _ = Describe("MCPServer Validation", func() {
 			}
 			Expect(k8sClient.Create(ctx, mcpServer)).To(Succeed())
 		})
+
+		It("should reject multiple storage mounts with duplicate paths", func() {
+			mcpServer := &MCPServer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "duplicate-storage-path",
+					Namespace: namespace.Name,
+				},
+				Spec: MCPServerSpec{
+					Source: Source{
+						Type: SourceTypeContainerImage,
+						ContainerImage: &ContainerImageSource{
+							Ref: "docker.io/library/test-image:latest",
+						},
+					},
+					Config: ServerConfig{
+						Port: 8080,
+						Storage: []StorageMount{
+							{
+								Path: "/etc/config",
+								Source: StorageSource{
+									Type: StorageTypeConfigMap,
+									ConfigMap: &corev1.ConfigMapVolumeSource{
+										LocalObjectReference: corev1.LocalObjectReference{
+											Name: "config-one",
+										},
+									},
+								},
+							},
+							{
+								Path: "/etc/config",
+								Source: StorageSource{
+									Type: StorageTypeConfigMap,
+									ConfigMap: &corev1.ConfigMapVolumeSource{
+										LocalObjectReference: corev1.LocalObjectReference{
+											Name: "config-two",
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, mcpServer)).NotTo(Succeed())
+		})
 	})
 
 	Context("RuntimeConfig validation", func() {

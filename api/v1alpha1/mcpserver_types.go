@@ -192,9 +192,12 @@ type ServerConfig struct {
 	// Storage defines storage mounts for ConfigMaps and Secrets.
 	// Each item uses native Kubernetes volume source types for consistency and feature parity.
 	// If specified, must contain at least 1 item. Maximum 64 items.
+	// Each storage mount must have a unique path.
 	// +optional
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=64
+	// +listType=map
+	// +listMapKey=path
 	Storage []StorageMount `json:"storage,omitempty"`
 
 	// Path is the HTTP path where the MCP server listens for SSE/Streamable HTTP connections.
