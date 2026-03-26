@@ -345,6 +345,7 @@ type MCPServerStatus struct {
 }
 
 // +kubebuilder:object:root=true
+// +kubebuilder:ac:generate=true
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Image",type=string,JSONPath=`.spec.source.containerImage.ref`

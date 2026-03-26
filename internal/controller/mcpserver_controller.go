@@ -31,6 +31,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	v1ac "k8s.io/client-go/applyconfigurations/meta/v1"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -38,6 +39,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	mcpv1alpha1 "github.com/kubernetes-sigs/mcp-lifecycle-operator/api/v1alpha1"
+	acv1alpha1 "github.com/kubernetes-sigs/mcp-lifecycle-operator/api/v1alpha1/applyconfiguration/api/v1alpha1"
 )
 
 // Phase constants for MCPServer status.
@@ -45,6 +47,8 @@ const (
 	PhasePending = "Pending"
 	PhaseRunning = "Running"
 	PhaseFailed  = "Failed"
+
+	fieldManager = "mcpserver-controller"
 )
 
 // MCPServerReconciler reconciles a MCPServer object
@@ -84,8 +88,7 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	// Set initial phase
 	if mcpServer.Status.Phase == "" {
-		mcpServer.Status.Phase = PhasePending
-		if err := r.Status().Update(ctx, mcpServer); err != nil {
+		if err := r.applyStatus(ctx, mcpServer, acv1alpha1.MCPServerStatus().WithPhase(PhasePending)); err != nil {
 			logger.Error(err, "Failed to update MCPServer status")
 			return ctrl.Result{}, err
 		}
@@ -104,28 +107,22 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, err
 	}
 
-	// Update status based on Deployment status
-	mcpServer.Status.DeploymentName = existingDeployment.Name
-	mcpServer.Status.ServiceName = mcpServer.Name
-	if mcpServer.Spec.Config.Port > 0 {
-		path := mcpServer.Spec.Config.Path
-		if path == "" {
-			path = "/mcp"
-		}
-		mcpServer.Status.Address = &mcpv1alpha1.MCPServerAddress{
-			// TODO: enhance this later to be TLS aware
-			URL: fmt.Sprintf("http://%s.%s.svc.cluster.local:%d%s",
-				mcpServer.Name, mcpServer.Namespace, mcpServer.Spec.Config.Port, path),
-		}
+	phase, condition := determinePhase(existingDeployment, mcpServer.Generation, mcpServer.Status.Conditions)
+
+	path := mcpServer.Spec.Config.Path
+	if path == "" {
+		path = "/mcp"
 	}
 
-	// Determine phase from deployment status
-	phase, condition := determinePhase(existingDeployment, mcpServer.Generation)
-	mcpServer.Status.Phase = phase
-	meta.SetStatusCondition(&mcpServer.Status.Conditions, condition)
+	status := acv1alpha1.MCPServerStatus().
+		WithPhase(phase).
+		WithDeploymentName(existingDeployment.Name).
+		WithServiceName(mcpServer.Name).
+		WithAddress(acv1alpha1.MCPServerAddress().WithURL(fmt.Sprintf("http://%s.%s.svc.cluster.local:%d%s", mcpServer.Name, mcpServer.Namespace, mcpServer.Spec.Config.Port, path))).
+		WithConditions(conditionToAC(condition))
 
-	if err := r.Status().Update(ctx, mcpServer); err != nil {
-		logger.Error(err, "Failed to update MCPServer status")
+	if err := r.applyStatus(ctx, mcpServer, status); err != nil {
+		logger.Error(err, "Failed to apply new MCPServer status")
 		return ctrl.Result{}, err
 	}
 
@@ -137,6 +134,7 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 func determinePhase(
 	deployment *appsv1.Deployment,
 	generation int64,
+	existingConditions []metav1.Condition,
 ) (string, metav1.Condition) {
 	deploymentAvailable := false
 	deploymentProgressing := false
@@ -165,23 +163,33 @@ func determinePhase(
 	}
 
 	if len(deployment.Status.Conditions) == 0 && deployment.Status.ReadyReplicas == 0 {
-		return PhasePending, metav1.Condition{
+		condition := metav1.Condition{
 			Type:               "Ready",
 			Status:             metav1.ConditionFalse,
 			Reason:             "DeploymentPending",
 			Message:            "Waiting for Deployment to report status",
 			ObservedGeneration: generation,
+			LastTransitionTime: metav1.Now(),
 		}
+
+		preserveLastTransitionTime(&condition, existingConditions)
+
+		return PhasePending, condition
 	}
 
 	if deploymentAvailable && deployment.Status.ReadyReplicas > 0 {
-		return PhaseRunning, metav1.Condition{
+		condition := metav1.Condition{
 			Type:               "Ready",
 			Status:             metav1.ConditionTrue,
 			Reason:             "DeploymentAvailable",
 			Message:            "Deployment is available and ready",
 			ObservedGeneration: generation,
+			LastTransitionTime: metav1.Now(),
 		}
+
+		preserveLastTransitionTime(&condition, existingConditions)
+
+		return PhaseRunning, condition
 	}
 
 	if deploymentReplicaFailure || (!deploymentProgressing && !deploymentAvailable) {
@@ -189,22 +197,33 @@ func determinePhase(
 		if deploymentMessage != "" {
 			message = deploymentMessage
 		}
-		return PhaseFailed, metav1.Condition{
+
+		condition := metav1.Condition{
 			Type:               "Ready",
 			Status:             metav1.ConditionFalse,
 			Reason:             "DeploymentFailed",
 			Message:            message,
 			ObservedGeneration: generation,
+			LastTransitionTime: metav1.Now(),
 		}
+
+		preserveLastTransitionTime(&condition, existingConditions)
+
+		return PhaseFailed, condition
 	}
 
-	return PhasePending, metav1.Condition{
+	condition := metav1.Condition{
 		Type:               "Ready",
 		Status:             metav1.ConditionFalse,
 		Reason:             "DeploymentProgressing",
 		Message:            "Deployment is progressing",
 		ObservedGeneration: generation,
+		LastTransitionTime: metav1.Now(),
 	}
+
+	preserveLastTransitionTime(&condition, existingConditions)
+
+	return PhasePending, condition
 }
 
 // reconcileDeployment creates or updates the Deployment for the MCPServer
@@ -562,16 +581,62 @@ func (r *MCPServerReconciler) createService(mcpServer *mcpv1alpha1.MCPServer) *c
 
 // updateStatusFailed updates the MCPServer status to Failed
 func (r *MCPServerReconciler) updateStatusFailed(ctx context.Context, mcpServer *mcpv1alpha1.MCPServer, message string) {
-	mcpServer.Status.Phase = PhaseFailed
-	meta.SetStatusCondition(&mcpServer.Status.Conditions, metav1.Condition{
+	condition := metav1.Condition{
 		Type:               "Ready",
 		Status:             metav1.ConditionFalse,
 		Reason:             "ReconciliationFailed",
 		Message:            message,
 		ObservedGeneration: mcpServer.Generation,
-	})
-	if err := r.Status().Update(ctx, mcpServer); err != nil {
+		LastTransitionTime: metav1.Now(),
+	}
+
+	preserveLastTransitionTime(&condition, mcpServer.Status.Conditions)
+
+	status := acv1alpha1.MCPServerStatus().
+		WithPhase(PhaseFailed).
+		WithServiceName(mcpServer.Name).
+		WithConditions(conditionToAC(condition))
+
+	if mcpServer.Status.DeploymentName != "" {
+		status = status.WithDeploymentName(mcpServer.Status.DeploymentName)
+	}
+
+	if mcpServer.Status.Address != nil {
+		status = status.WithAddress(acv1alpha1.MCPServerAddress().WithURL(mcpServer.Status.Address.URL))
+	}
+
+	if err := r.applyStatus(ctx, mcpServer, status); err != nil {
 		log.FromContext(ctx).Error(err, "Failed to update MCPServer status to Failed")
+	}
+}
+
+func (r *MCPServerReconciler) applyStatus(
+	ctx context.Context,
+	mcpServer *mcpv1alpha1.MCPServer,
+	status *acv1alpha1.MCPServerStatusApplyConfiguration,
+) error {
+	return r.Status().Apply(ctx,
+		acv1alpha1.MCPServer(mcpServer.Name, mcpServer.Namespace).WithStatus(status),
+		client.FieldOwner(fieldManager),
+		client.ForceOwnership,
+	)
+}
+
+func conditionToAC(condition metav1.Condition) *v1ac.ConditionApplyConfiguration {
+	return v1ac.Condition().
+		WithType(condition.Type).
+		WithStatus(condition.Status).
+		WithReason(condition.Reason).
+		WithMessage(condition.Message).
+		WithObservedGeneration(condition.ObservedGeneration).
+		WithLastTransitionTime(condition.LastTransitionTime)
+}
+
+// preserveLastTransitionTime keeps the existing LastTransitionTime when the
+// condition status has not changed, so that timestamps reflect actual transitions.
+func preserveLastTransitionTime(condition *metav1.Condition, existingConditions []metav1.Condition) {
+	if existing := meta.FindStatusCondition(existingConditions, condition.Type); existing != nil && existing.Status == condition.Status {
+		condition.LastTransitionTime = existing.LastTransitionTime
 	}
 }
 

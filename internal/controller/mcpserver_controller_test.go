@@ -29,10 +29,12 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -1690,7 +1692,7 @@ var _ = Describe("determinePhase", func() {
 		deployment := &appsv1.Deployment{
 			Status: appsv1.DeploymentStatus{},
 		}
-		phase, condition := determinePhase(deployment, generation)
+		phase, condition := determinePhase(deployment, generation, make([]metav1.Condition, 0))
 		Expect(phase).To(Equal(PhasePending))
 		Expect(condition.Reason).To(Equal("DeploymentPending"))
 		Expect(condition.Status).To(Equal(metav1.ConditionFalse))
@@ -1708,7 +1710,7 @@ var _ = Describe("determinePhase", func() {
 				},
 			},
 		}
-		phase, condition := determinePhase(deployment, generation)
+		phase, condition := determinePhase(deployment, generation, make([]metav1.Condition, 0))
 		Expect(phase).To(Equal(PhaseRunning))
 		Expect(condition.Reason).To(Equal("DeploymentAvailable"))
 		Expect(condition.Status).To(Equal(metav1.ConditionTrue))
@@ -1726,7 +1728,7 @@ var _ = Describe("determinePhase", func() {
 				},
 			},
 		}
-		phase, condition := determinePhase(deployment, generation)
+		phase, condition := determinePhase(deployment, generation, make([]metav1.Condition, 0))
 		Expect(phase).To(Equal(PhaseFailed))
 		Expect(condition.Reason).To(Equal("DeploymentFailed"))
 		Expect(condition.Message).To(Equal("replica failed"))
@@ -1743,7 +1745,7 @@ var _ = Describe("determinePhase", func() {
 				},
 			},
 		}
-		phase, condition := determinePhase(deployment, generation)
+		phase, condition := determinePhase(deployment, generation, make([]metav1.Condition, 0))
 		Expect(phase).To(Equal(PhasePending))
 		Expect(condition.Reason).To(Equal("DeploymentProgressing"))
 	})
@@ -2998,6 +3000,90 @@ var _ = Describe("MCPServer Controller - Storage Mounts", func() {
 			Expect(deployment.Spec.Template.Spec.Containers[0].Resources.Requests).To(HaveKeyWithValue(corev1.ResourceMemory, resource.MustParse("256Mi")))
 			Expect(deployment.Spec.Template.Spec.Containers[0].Resources.Limits).NotTo(HaveKey(corev1.ResourceCPU))
 			Expect(deployment.Spec.Template.Spec.Containers[0].Resources.Limits).To(HaveKeyWithValue(corev1.ResourceMemory, resource.MustParse("512Mi")))
+		})
+	})
+
+	Context("Server-side apply for status updates", func() {
+		const resourceName = "test-ssa-status"
+
+		ctx := context.Background()
+
+		typeNamespacedName := types.NamespacedName{
+			Name:      resourceName,
+			Namespace: "default",
+		}
+
+		BeforeEach(func() {
+			resource := &mcpv1alpha1.MCPServer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      resourceName,
+					Namespace: "default",
+				},
+				Spec: mcpv1alpha1.MCPServerSpec{
+					Source: mcpv1alpha1.Source{
+						Type: mcpv1alpha1.SourceTypeContainerImage,
+						ContainerImage: &mcpv1alpha1.ContainerImageSource{
+							Ref: "docker.io/library/test-image:latest",
+						},
+					},
+					Config: mcpv1alpha1.ServerConfig{
+						Port: 8080,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			resource := &mcpv1alpha1.MCPServer{}
+			err := k8sClient.Get(ctx, typeNamespacedName, resource)
+			if err == nil {
+				Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
+			}
+		})
+
+		It("should use SubResourceApply for all status updates and never SubResourceUpdate or SubResourcePatch", func() {
+			applyCallCount := 0
+			updateCalled := false
+			patchCalled := false
+
+			wrappedClient, err := client.NewWithWatch(cfg, client.Options{Scheme: k8sClient.Scheme()})
+			Expect(err).NotTo(HaveOccurred())
+
+			interceptedClient := interceptor.NewClient(wrappedClient, interceptor.Funcs{
+				SubResourceApply: func(ctx context.Context, c client.Client, subResourceName string, obj runtime.ApplyConfiguration, opts ...client.SubResourceApplyOption) error {
+					if subResourceName == "status" {
+						applyCallCount++
+					}
+					return c.SubResource(subResourceName).Apply(ctx, obj, opts...)
+				},
+				SubResourceUpdate: func(ctx context.Context, c client.Client, subResourceName string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+					if subResourceName == "status" {
+						updateCalled = true
+					}
+					return c.SubResource(subResourceName).Update(ctx, obj, opts...)
+				},
+				SubResourcePatch: func(ctx context.Context, c client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+					if subResourceName == "status" {
+						patchCalled = true
+					}
+					return c.SubResource(subResourceName).Patch(ctx, obj, patch, opts...)
+				},
+			})
+
+			controllerReconciler := &MCPServerReconciler{
+				Client: interceptedClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: typeNamespacedName,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(applyCallCount).To(BeNumerically(">", 0), "expected status updates to use SubResourceApply (SSA)")
+			Expect(updateCalled).To(BeFalse(), "status should not use SubResourceUpdate")
+			Expect(patchCalled).To(BeFalse(), "status should not use SubResourcePatch")
 		})
 	})
 })

@@ -19,6 +19,7 @@ limitations under the License.
 
 // Package v1alpha1 contains API Schema definitions for the mcp v1alpha1 API group.
 // +kubebuilder:object:generate=true
+// +kubebuilder:ac:generate=true
 // +groupName=mcp.x-k8s.io
 package v1alpha1
 
@@ -30,6 +31,10 @@ import (
 var (
 	// GroupVersion is group version used to register these objects.
 	GroupVersion = schema.GroupVersion{Group: "mcp.x-k8s.io", Version: "v1alpha1"}
+
+	// SchemeGroupVersion is an alias for GroupVersion, required by the
+	// generated apply configuration code.
+	SchemeGroupVersion = GroupVersion
 
 	// SchemeBuilder is used to add go types to the GroupVersionKind scheme.
 	SchemeBuilder = &scheme.Builder{GroupVersion: GroupVersion}
