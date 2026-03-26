@@ -3005,6 +3005,7 @@ var _ = Describe("MCPServer Controller - Storage Mounts", func() {
 
 	Context("Server-side apply for status updates", func() {
 		const resourceName = "test-ssa-status"
+		const subResourceStatus = "status"
 
 		ctx := context.Background()
 
@@ -3052,19 +3053,19 @@ var _ = Describe("MCPServer Controller - Storage Mounts", func() {
 
 			interceptedClient := interceptor.NewClient(wrappedClient, interceptor.Funcs{
 				SubResourceApply: func(ctx context.Context, c client.Client, subResourceName string, obj runtime.ApplyConfiguration, opts ...client.SubResourceApplyOption) error {
-					if subResourceName == "status" {
+					if subResourceName == subResourceStatus {
 						applyCallCount++
 					}
 					return c.SubResource(subResourceName).Apply(ctx, obj, opts...)
 				},
 				SubResourceUpdate: func(ctx context.Context, c client.Client, subResourceName string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
-					if subResourceName == "status" {
+					if subResourceName == subResourceStatus {
 						updateCalled = true
 					}
 					return c.SubResource(subResourceName).Update(ctx, obj, opts...)
 				},
 				SubResourcePatch: func(ctx context.Context, c client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
-					if subResourceName == "status" {
+					if subResourceName == subResourceStatus {
 						patchCalled = true
 					}
 					return c.SubResource(subResourceName).Patch(ctx, obj, patch, opts...)

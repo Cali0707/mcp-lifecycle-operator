@@ -346,33 +346,9 @@ func (r *MCPServerReconciler) createDeployment(ctx context.Context, mcpServer *m
 		container.Env = mcpServer.Spec.Config.Env
 	}
 	if len(mcpServer.Spec.Config.EnvFrom) > 0 {
-		// Verify referenced ConfigMaps and Secrets exist
-		for i, envFrom := range mcpServer.Spec.Config.EnvFrom {
-			if ref := envFrom.ConfigMapRef; ref != nil {
-				if ref.Optional == nil || !*ref.Optional {
-					configMap := &corev1.ConfigMap{}
-					if err := r.Get(ctx, client.ObjectKey{
-						Name:      ref.Name,
-						Namespace: mcpServer.Namespace,
-					}, configMap); err != nil {
-						return nil, fmt.Errorf("failed to get ConfigMap %s for envFrom at index %d: %w", ref.Name, i, err)
-					}
-				}
-			}
-			if ref := envFrom.SecretRef; ref != nil {
-				if ref.Optional == nil || !*ref.Optional {
-					secret := &corev1.Secret{}
-					if err := r.Get(ctx, client.ObjectKey{
-						Name:      ref.Name,
-						Namespace: mcpServer.Namespace,
-					}, secret); err != nil {
-						return nil, fmt.Errorf("failed to get Secret %s for envFrom at index %d: %w", ref.Name, i, err)
-					}
-				}
-			}
+		if err := r.validateEnvFrom(ctx, mcpServer); err != nil {
+			return nil, err
 		}
-
-		// envFrom is valid, let's set it on the container
 		container.EnvFrom = mcpServer.Spec.Config.EnvFrom
 	}
 
@@ -388,90 +364,11 @@ func (r *MCPServerReconciler) createDeployment(ctx context.Context, mcpServer *m
 		container.Resources = *mcpServer.Spec.Runtime.Resources
 	}
 
-	// Process storage mounts from the new Storage API
-	volumes := make([]corev1.Volume, 0, len(mcpServer.Spec.Config.Storage))
-	volumeMounts := make([]corev1.VolumeMount, 0, len(mcpServer.Spec.Config.Storage))
-
-	for i, storage := range mcpServer.Spec.Config.Storage {
-		// Generate a unique volume name for each storage mount
-		volumeName := fmt.Sprintf("vol-%d", i)
-
-		// Create volume mount
-		volumeMount := corev1.VolumeMount{
-			Name:      volumeName,
-			MountPath: storage.Path,
-		}
-
-		// Set permissions based on MountPermissions enum
-		// Default to ReadOnly if not specified (empty string means use default)
-		permissions := storage.Permissions
-		if permissions == "" {
-			permissions = mcpv1alpha1.MountPermissionsReadOnly
-		}
-
-		switch permissions {
-		case mcpv1alpha1.MountPermissionsReadOnly:
-			volumeMount.ReadOnly = true
-		case mcpv1alpha1.MountPermissionsReadWrite:
-			volumeMount.ReadOnly = false
-		case mcpv1alpha1.MountPermissionsRecursiveReadOnly:
-			volumeMount.ReadOnly = true
-			volumeMount.RecursiveReadOnly = ptr.To(corev1.RecursiveReadOnlyEnabled)
-		}
-
-		volumeMounts = append(volumeMounts, volumeMount)
-
-		// Create volume based on type
-		volume := corev1.Volume{
-			Name: volumeName,
-		}
-
-		switch storage.Source.Type {
-		case mcpv1alpha1.StorageTypeConfigMap:
-			if storage.Source.ConfigMap == nil {
-				return nil, fmt.Errorf("configMap must be set when type is ConfigMap for storage mount at index %d", i)
-			}
-			// Validate ConfigMap name is not empty
-			if storage.Source.ConfigMap.Name == "" {
-				return nil, fmt.Errorf("configMap name must not be empty for storage mount at index %d", i)
-			}
-			// Verify ConfigMap exists only if not optional
-			if storage.Source.ConfigMap.Optional == nil || !*storage.Source.ConfigMap.Optional {
-				configMap := &corev1.ConfigMap{}
-				if err := r.Get(ctx, client.ObjectKey{
-					Name:      storage.Source.ConfigMap.Name,
-					Namespace: mcpServer.Namespace,
-				}, configMap); err != nil {
-					return nil, fmt.Errorf("failed to get ConfigMap %s for storage mount at index %d: %w", storage.Source.ConfigMap.Name, i, err)
-				}
-			}
-			volume.ConfigMap = storage.Source.ConfigMap
-		case mcpv1alpha1.StorageTypeSecret:
-			if storage.Source.Secret == nil {
-				return nil, fmt.Errorf("secret must be set when type is Secret for storage mount at index %d", i)
-			}
-			// Validate Secret name is not empty
-			if storage.Source.Secret.SecretName == "" {
-				return nil, fmt.Errorf("secret name must not be empty for storage mount at index %d", i)
-			}
-			// Verify Secret exists only if not optional
-			if storage.Source.Secret.Optional == nil || !*storage.Source.Secret.Optional {
-				secret := &corev1.Secret{}
-				if err := r.Get(ctx, client.ObjectKey{
-					Name:      storage.Source.Secret.SecretName,
-					Namespace: mcpServer.Namespace,
-				}, secret); err != nil {
-					return nil, fmt.Errorf("failed to get Secret %s for storage mount at index %d: %w", storage.Source.Secret.SecretName, i, err)
-				}
-			}
-			volume.Secret = storage.Source.Secret
-		default:
-			return nil, fmt.Errorf("unsupported storage type %s at index %d", storage.Source.Type, i)
-		}
-
-		volumes = append(volumes, volume)
+	// Process storage mounts
+	volumes, volumeMounts, err := r.processStorageMounts(ctx, mcpServer)
+	if err != nil {
+		return nil, err
 	}
-
 	container.VolumeMounts = volumeMounts
 
 	deployment := &appsv1.Deployment{
@@ -507,6 +404,119 @@ func (r *MCPServerReconciler) createDeployment(ctx context.Context, mcpServer *m
 	deployment.Spec.Template.Spec.SecurityContext = mcpServer.Spec.Runtime.Security.PodSecurityContext
 
 	return deployment, nil
+}
+
+// validateEnvFrom verifies that referenced ConfigMaps and Secrets exist for non-optional envFrom entries.
+func (r *MCPServerReconciler) validateEnvFrom(ctx context.Context, mcpServer *mcpv1alpha1.MCPServer) error {
+	for i, envFrom := range mcpServer.Spec.Config.EnvFrom {
+		if ref := envFrom.ConfigMapRef; ref != nil {
+			if ref.Optional == nil || !*ref.Optional {
+				configMap := &corev1.ConfigMap{}
+				if err := r.Get(ctx, client.ObjectKey{
+					Name:      ref.Name,
+					Namespace: mcpServer.Namespace,
+				}, configMap); err != nil {
+					return fmt.Errorf("failed to get ConfigMap %s for envFrom at index %d: %w", ref.Name, i, err)
+				}
+			}
+		}
+		if ref := envFrom.SecretRef; ref != nil {
+			if ref.Optional == nil || !*ref.Optional {
+				secret := &corev1.Secret{}
+				if err := r.Get(ctx, client.ObjectKey{
+					Name:      ref.Name,
+					Namespace: mcpServer.Namespace,
+				}, secret); err != nil {
+					return fmt.Errorf("failed to get Secret %s for envFrom at index %d: %w", ref.Name, i, err)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// processStorageMounts builds volumes and volume mounts from the MCPServer storage configuration,
+// validating that referenced ConfigMaps and Secrets exist for non-optional entries.
+func (r *MCPServerReconciler) processStorageMounts(
+	ctx context.Context,
+	mcpServer *mcpv1alpha1.MCPServer,
+) ([]corev1.Volume, []corev1.VolumeMount, error) {
+	volumes := make([]corev1.Volume, 0, len(mcpServer.Spec.Config.Storage))
+	volumeMounts := make([]corev1.VolumeMount, 0, len(mcpServer.Spec.Config.Storage))
+
+	for i, storage := range mcpServer.Spec.Config.Storage {
+		volumeName := fmt.Sprintf("vol-%d", i)
+
+		volumeMount := corev1.VolumeMount{
+			Name:      volumeName,
+			MountPath: storage.Path,
+		}
+
+		// Default to ReadOnly if not specified
+		permissions := storage.Permissions
+		if permissions == "" {
+			permissions = mcpv1alpha1.MountPermissionsReadOnly
+		}
+
+		switch permissions {
+		case mcpv1alpha1.MountPermissionsReadOnly:
+			volumeMount.ReadOnly = true
+		case mcpv1alpha1.MountPermissionsReadWrite:
+			volumeMount.ReadOnly = false
+		case mcpv1alpha1.MountPermissionsRecursiveReadOnly:
+			volumeMount.ReadOnly = true
+			volumeMount.RecursiveReadOnly = ptr.To(corev1.RecursiveReadOnlyEnabled)
+		}
+
+		volumeMounts = append(volumeMounts, volumeMount)
+
+		volume := corev1.Volume{
+			Name: volumeName,
+		}
+
+		switch storage.Source.Type {
+		case mcpv1alpha1.StorageTypeConfigMap:
+			if storage.Source.ConfigMap == nil {
+				return nil, nil, fmt.Errorf("configMap must be set when type is ConfigMap for storage mount at index %d", i)
+			}
+			if storage.Source.ConfigMap.Name == "" {
+				return nil, nil, fmt.Errorf("configMap name must not be empty for storage mount at index %d", i)
+			}
+			if storage.Source.ConfigMap.Optional == nil || !*storage.Source.ConfigMap.Optional {
+				configMap := &corev1.ConfigMap{}
+				if err := r.Get(ctx, client.ObjectKey{
+					Name:      storage.Source.ConfigMap.Name,
+					Namespace: mcpServer.Namespace,
+				}, configMap); err != nil {
+					return nil, nil, fmt.Errorf("failed to get ConfigMap %s for storage mount at index %d: %w", storage.Source.ConfigMap.Name, i, err)
+				}
+			}
+			volume.ConfigMap = storage.Source.ConfigMap
+		case mcpv1alpha1.StorageTypeSecret:
+			if storage.Source.Secret == nil {
+				return nil, nil, fmt.Errorf("secret must be set when type is Secret for storage mount at index %d", i)
+			}
+			if storage.Source.Secret.SecretName == "" {
+				return nil, nil, fmt.Errorf("secret name must not be empty for storage mount at index %d", i)
+			}
+			if storage.Source.Secret.Optional == nil || !*storage.Source.Secret.Optional {
+				secret := &corev1.Secret{}
+				if err := r.Get(ctx, client.ObjectKey{
+					Name:      storage.Source.Secret.SecretName,
+					Namespace: mcpServer.Namespace,
+				}, secret); err != nil {
+					return nil, nil, fmt.Errorf("failed to get Secret %s for storage mount at index %d: %w", storage.Source.Secret.SecretName, i, err)
+				}
+			}
+			volume.Secret = storage.Source.Secret
+		default:
+			return nil, nil, fmt.Errorf("unsupported storage type %s at index %d", storage.Source.Type, i)
+		}
+
+		volumes = append(volumes, volume)
+	}
+
+	return volumes, volumeMounts, nil
 }
 
 // reconcileService creates or updates the Service for the MCPServer.
