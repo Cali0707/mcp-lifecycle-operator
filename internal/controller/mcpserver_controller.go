@@ -86,14 +86,6 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	logger.Info("Reconciling MCPServer", "name", mcpServer.Name, "namespace", mcpServer.Namespace)
 
-	// Set initial phase
-	if mcpServer.Status.Phase == "" {
-		if err := r.applyStatus(ctx, mcpServer, acv1alpha1.MCPServerStatus().WithPhase(PhasePending)); err != nil {
-			logger.Error(err, "Failed to update MCPServer status")
-			return ctrl.Result{}, err
-		}
-	}
-
 	// Reconcile Deployment
 	existingDeployment, err := r.reconcileDeployment(ctx, mcpServer)
 	if err != nil {
