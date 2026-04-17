@@ -37,9 +37,13 @@ import (
 	v1ac "k8s.io/client-go/applyconfigurations/meta/v1"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	mcpv1alpha1 "github.com/kubernetes-sigs/mcp-lifecycle-operator/api/v1alpha1"
 	acv1alpha1 "github.com/kubernetes-sigs/mcp-lifecycle-operator/api/v1alpha1/applyconfiguration/api/v1alpha1"
@@ -78,6 +82,14 @@ const (
 const (
 	// requeueDelayDeploymentUnavailable is the delay before requeuing when a deployment is not yet available.
 	requeueDelayDeploymentUnavailable = 15 * time.Second
+)
+
+// Index keys for field indexing.
+const (
+	// configMapIndexKey is the index key for finding MCPServers by ConfigMap reference.
+	configMapIndexKey = "spec.configMapRefs"
+	// secretIndexKey is the index key for finding MCPServers by Secret reference.
+	secretIndexKey = "spec.secretRefs"
 )
 
 // MCPServerReconciler reconciles a MCPServer object
@@ -1138,12 +1150,180 @@ func (r *MCPServerReconciler) setAcceptedCondition(
 	), true
 }
 
+// extractConfigMapNames is an index extractor that returns all ConfigMap names
+// referenced by an MCPServer. Used for efficient ConfigMap watch lookups.
+// This returns both required and optional ConfigMap references, matching Kubernetes
+// semantics where optional resources are still used when available.
+func extractConfigMapNames(obj client.Object) []string {
+	mcpServer := obj.(*mcpv1alpha1.MCPServer)
+	var configMaps []string
+	seen := make(map[string]bool)
+
+	// Extract from storage mounts
+	for _, storage := range mcpServer.Spec.Config.Storage {
+		if storage.Source.Type == mcpv1alpha1.StorageTypeConfigMap &&
+			storage.Source.ConfigMap != nil {
+			name := storage.Source.ConfigMap.Name
+			if !seen[name] {
+				configMaps = append(configMaps, name)
+				seen[name] = true
+			}
+		}
+	}
+
+	// Extract from envFrom
+	for _, envFrom := range mcpServer.Spec.Config.EnvFrom {
+		if envFrom.ConfigMapRef != nil {
+			name := envFrom.ConfigMapRef.Name
+			if !seen[name] {
+				configMaps = append(configMaps, name)
+				seen[name] = true
+			}
+		}
+	}
+
+	// Extract from env valueFrom
+	for _, env := range mcpServer.Spec.Config.Env {
+		if env.ValueFrom != nil && env.ValueFrom.ConfigMapKeyRef != nil {
+			name := env.ValueFrom.ConfigMapKeyRef.Name
+			if !seen[name] {
+				configMaps = append(configMaps, name)
+				seen[name] = true
+			}
+		}
+	}
+
+	return configMaps
+}
+
+// extractSecretNames is an index extractor that returns all Secret names
+// referenced by an MCPServer. Used for efficient Secret watch lookups.
+// This returns both required and optional Secret references, matching Kubernetes
+// semantics where optional resources are still used when available.
+func extractSecretNames(obj client.Object) []string {
+	mcpServer := obj.(*mcpv1alpha1.MCPServer)
+	var secrets []string
+	seen := make(map[string]bool)
+
+	// Extract from storage mounts
+	for _, storage := range mcpServer.Spec.Config.Storage {
+		if storage.Source.Type == mcpv1alpha1.StorageTypeSecret &&
+			storage.Source.Secret != nil {
+			name := storage.Source.Secret.SecretName
+			if !seen[name] {
+				secrets = append(secrets, name)
+				seen[name] = true
+			}
+		}
+	}
+
+	// Extract from envFrom
+	for _, envFrom := range mcpServer.Spec.Config.EnvFrom {
+		if envFrom.SecretRef != nil {
+			name := envFrom.SecretRef.Name
+			if !seen[name] {
+				secrets = append(secrets, name)
+				seen[name] = true
+			}
+		}
+	}
+
+	// Extract from env valueFrom
+	for _, env := range mcpServer.Spec.Config.Env {
+		if env.ValueFrom != nil && env.ValueFrom.SecretKeyRef != nil {
+			name := env.ValueFrom.SecretKeyRef.Name
+			if !seen[name] {
+				secrets = append(secrets, name)
+				seen[name] = true
+			}
+		}
+	}
+
+	return secrets
+}
+
+// findMCPServersForResource is a generic helper that finds all MCPServers
+// referencing a given resource by name using the specified field index.
+func (r *MCPServerReconciler) findMCPServersForResource(
+	ctx context.Context,
+	resourceName string,
+	namespace string,
+	indexKey string,
+) []reconcile.Request {
+	logger := log.FromContext(ctx)
+	var mcpServers mcpv1alpha1.MCPServerList
+
+	// Use the index to find MCPServers that reference this resource
+	if err := r.List(ctx, &mcpServers,
+		client.InNamespace(namespace),
+		client.MatchingFields{indexKey: resourceName},
+	); err != nil {
+		logger.Error(err, "Failed to list MCPServers for resource",
+			"resourceName", resourceName,
+			"namespace", namespace,
+			"indexKey", indexKey)
+		return []reconcile.Request{}
+	}
+
+	requests := make([]reconcile.Request, 0, len(mcpServers.Items))
+	for _, mcpServer := range mcpServers.Items {
+		requests = append(requests, reconcile.Request{
+			NamespacedName: client.ObjectKeyFromObject(&mcpServer),
+		})
+	}
+	return requests
+}
+
+// findMCPServersForConfigMap finds all MCPServers that reference the given ConfigMap
+// using the field index for efficient lookup.
+func (r *MCPServerReconciler) findMCPServersForConfigMap(ctx context.Context, configMap client.Object) []reconcile.Request {
+	return r.findMCPServersForResource(ctx, configMap.GetName(), configMap.GetNamespace(), configMapIndexKey)
+}
+
+// findMCPServersForSecret finds all MCPServers that reference the given Secret
+// using the field index for efficient lookup.
+func (r *MCPServerReconciler) findMCPServersForSecret(ctx context.Context, secret client.Object) []reconcile.Request {
+	return r.findMCPServersForResource(ctx, secret.GetName(), secret.GetNamespace(), secretIndexKey)
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *MCPServerReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	ctx := context.Background()
+
+	// Register ConfigMap index for efficient lookups
+	if err := mgr.GetFieldIndexer().IndexField(
+		ctx,
+		&mcpv1alpha1.MCPServer{},
+		configMapIndexKey,
+		extractConfigMapNames,
+	); err != nil {
+		return fmt.Errorf("failed to setup ConfigMap index: %w", err)
+	}
+
+	// Register Secret index for efficient lookups
+	if err := mgr.GetFieldIndexer().IndexField(
+		ctx,
+		&mcpv1alpha1.MCPServer{},
+		secretIndexKey,
+		extractSecretNames,
+	); err != nil {
+		return fmt.Errorf("failed to setup Secret index: %w", err)
+	}
+
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&mcpv1alpha1.MCPServer{}).
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.Service{}).
+		Watches(
+			&corev1.ConfigMap{},
+			handler.EnqueueRequestsFromMapFunc(r.findMCPServersForConfigMap),
+			builder.WithPredicates(predicate.ResourceVersionChangedPredicate{}),
+		).
+		Watches(
+			&corev1.Secret{},
+			handler.EnqueueRequestsFromMapFunc(r.findMCPServersForSecret),
+			builder.WithPredicates(predicate.ResourceVersionChangedPredicate{}),
+		).
 		Named("mcpserver").
 		Complete(r)
 }

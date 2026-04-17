@@ -6501,4 +6501,278 @@ var _ = Describe("isSameGroupKind", func() {
 		}
 		Expect(isSameGroupKind(ownerRef, "", "Pod")).To(BeTrue())
 	})
+
+	Describe("ConfigMap/Secret index extractors", func() {
+		Context("extractConfigMapNames", func() {
+			It("should extract ConfigMap names from storage mounts", func() {
+				mcpServer := &mcpv1alpha1.MCPServer{
+					Spec: mcpv1alpha1.MCPServerSpec{
+						Config: mcpv1alpha1.ServerConfig{
+							Storage: []mcpv1alpha1.StorageMount{
+								{
+									Source: mcpv1alpha1.StorageSource{
+										Type: mcpv1alpha1.StorageTypeConfigMap,
+										ConfigMap: &corev1.ConfigMapVolumeSource{
+											LocalObjectReference: corev1.LocalObjectReference{
+												Name: "my-config",
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				}
+
+				names := extractConfigMapNames(mcpServer)
+				Expect(names).To(ConsistOf("my-config"))
+			})
+
+			It("should extract ConfigMap names from envFrom", func() {
+				mcpServer := &mcpv1alpha1.MCPServer{
+					Spec: mcpv1alpha1.MCPServerSpec{
+						Config: mcpv1alpha1.ServerConfig{
+							EnvFrom: []corev1.EnvFromSource{
+								{
+									ConfigMapRef: &corev1.ConfigMapEnvSource{
+										LocalObjectReference: corev1.LocalObjectReference{
+											Name: "env-config",
+										},
+									},
+								},
+							},
+						},
+					},
+				}
+
+				names := extractConfigMapNames(mcpServer)
+				Expect(names).To(ConsistOf("env-config"))
+			})
+
+			It("should extract ConfigMap names from env valueFrom", func() {
+				mcpServer := &mcpv1alpha1.MCPServer{
+					Spec: mcpv1alpha1.MCPServerSpec{
+						Config: mcpv1alpha1.ServerConfig{
+							Env: []corev1.EnvVar{
+								{
+									Name: "MY_VAR",
+									ValueFrom: &corev1.EnvVarSource{
+										ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
+											LocalObjectReference: corev1.LocalObjectReference{
+												Name: "var-config",
+											},
+											Key: "some-key",
+										},
+									},
+								},
+							},
+						},
+					},
+				}
+
+				names := extractConfigMapNames(mcpServer)
+				Expect(names).To(ConsistOf("var-config"))
+			})
+
+			It("should extract and deduplicate ConfigMap names from multiple locations", func() {
+				mcpServer := &mcpv1alpha1.MCPServer{
+					Spec: mcpv1alpha1.MCPServerSpec{
+						Config: mcpv1alpha1.ServerConfig{
+							Storage: []mcpv1alpha1.StorageMount{
+								{
+									Source: mcpv1alpha1.StorageSource{
+										Type: mcpv1alpha1.StorageTypeConfigMap,
+										ConfigMap: &corev1.ConfigMapVolumeSource{
+											LocalObjectReference: corev1.LocalObjectReference{
+												Name: "config-a",
+											},
+										},
+									},
+								},
+							},
+							EnvFrom: []corev1.EnvFromSource{
+								{
+									ConfigMapRef: &corev1.ConfigMapEnvSource{
+										LocalObjectReference: corev1.LocalObjectReference{
+											Name: "config-b",
+										},
+									},
+								},
+								{
+									ConfigMapRef: &corev1.ConfigMapEnvSource{
+										LocalObjectReference: corev1.LocalObjectReference{
+											Name: "config-a", // Duplicate
+										},
+									},
+								},
+							},
+							Env: []corev1.EnvVar{
+								{
+									Name: "VAR",
+									ValueFrom: &corev1.EnvVarSource{
+										ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
+											LocalObjectReference: corev1.LocalObjectReference{
+												Name: "config-c",
+											},
+											Key: "key",
+										},
+									},
+								},
+							},
+						},
+					},
+				}
+
+				names := extractConfigMapNames(mcpServer)
+				Expect(names).To(ConsistOf("config-a", "config-b", "config-c"))
+			})
+
+			It("should return empty slice when no ConfigMaps are referenced", func() {
+				mcpServer := &mcpv1alpha1.MCPServer{
+					Spec: mcpv1alpha1.MCPServerSpec{
+						Config: mcpv1alpha1.ServerConfig{
+							Port: 8080,
+						},
+					},
+				}
+
+				names := extractConfigMapNames(mcpServer)
+				Expect(names).To(BeEmpty())
+			})
+		})
+
+		Context("extractSecretNames", func() {
+			It("should extract Secret names from storage mounts", func() {
+				mcpServer := &mcpv1alpha1.MCPServer{
+					Spec: mcpv1alpha1.MCPServerSpec{
+						Config: mcpv1alpha1.ServerConfig{
+							Storage: []mcpv1alpha1.StorageMount{
+								{
+									Source: mcpv1alpha1.StorageSource{
+										Type: mcpv1alpha1.StorageTypeSecret,
+										Secret: &corev1.SecretVolumeSource{
+											SecretName: "my-secret",
+										},
+									},
+								},
+							},
+						},
+					},
+				}
+
+				names := extractSecretNames(mcpServer)
+				Expect(names).To(ConsistOf("my-secret"))
+			})
+
+			It("should extract Secret names from envFrom", func() {
+				mcpServer := &mcpv1alpha1.MCPServer{
+					Spec: mcpv1alpha1.MCPServerSpec{
+						Config: mcpv1alpha1.ServerConfig{
+							EnvFrom: []corev1.EnvFromSource{
+								{
+									SecretRef: &corev1.SecretEnvSource{
+										LocalObjectReference: corev1.LocalObjectReference{
+											Name: "env-secret",
+										},
+									},
+								},
+							},
+						},
+					},
+				}
+
+				names := extractSecretNames(mcpServer)
+				Expect(names).To(ConsistOf("env-secret"))
+			})
+
+			It("should extract Secret names from env valueFrom", func() {
+				mcpServer := &mcpv1alpha1.MCPServer{
+					Spec: mcpv1alpha1.MCPServerSpec{
+						Config: mcpv1alpha1.ServerConfig{
+							Env: []corev1.EnvVar{
+								{
+									Name: "MY_VAR",
+									ValueFrom: &corev1.EnvVarSource{
+										SecretKeyRef: &corev1.SecretKeySelector{
+											LocalObjectReference: corev1.LocalObjectReference{
+												Name: "var-secret",
+											},
+											Key: "some-key",
+										},
+									},
+								},
+							},
+						},
+					},
+				}
+
+				names := extractSecretNames(mcpServer)
+				Expect(names).To(ConsistOf("var-secret"))
+			})
+
+			It("should extract and deduplicate Secret names from multiple locations", func() {
+				mcpServer := &mcpv1alpha1.MCPServer{
+					Spec: mcpv1alpha1.MCPServerSpec{
+						Config: mcpv1alpha1.ServerConfig{
+							Storage: []mcpv1alpha1.StorageMount{
+								{
+									Source: mcpv1alpha1.StorageSource{
+										Type: mcpv1alpha1.StorageTypeSecret,
+										Secret: &corev1.SecretVolumeSource{
+											SecretName: "secret-a",
+										},
+									},
+								},
+							},
+							EnvFrom: []corev1.EnvFromSource{
+								{
+									SecretRef: &corev1.SecretEnvSource{
+										LocalObjectReference: corev1.LocalObjectReference{
+											Name: "secret-b",
+										},
+									},
+								},
+								{
+									SecretRef: &corev1.SecretEnvSource{
+										LocalObjectReference: corev1.LocalObjectReference{
+											Name: "secret-a", // Duplicate
+										},
+									},
+								},
+							},
+							Env: []corev1.EnvVar{
+								{
+									Name: "VAR",
+									ValueFrom: &corev1.EnvVarSource{
+										SecretKeyRef: &corev1.SecretKeySelector{
+											LocalObjectReference: corev1.LocalObjectReference{
+												Name: "secret-c",
+											},
+											Key: "key",
+										},
+									},
+								},
+							},
+						},
+					},
+				}
+
+				names := extractSecretNames(mcpServer)
+				Expect(names).To(ConsistOf("secret-a", "secret-b", "secret-c"))
+			})
+
+			It("should return empty slice when no Secrets are referenced", func() {
+				mcpServer := &mcpv1alpha1.MCPServer{
+					Spec: mcpv1alpha1.MCPServerSpec{
+						Config: mcpv1alpha1.ServerConfig{
+							Port: 8080,
+						},
+					},
+				}
+
+				names := extractSecretNames(mcpServer)
+				Expect(names).To(BeEmpty())
+			})
+		})
+	})
 })
