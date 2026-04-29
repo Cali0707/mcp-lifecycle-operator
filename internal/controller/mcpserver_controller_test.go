@@ -29,7 +29,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/events"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -38,6 +40,29 @@ import (
 
 	mcpv1alpha1 "github.com/kubernetes-sigs/mcp-lifecycle-operator/api/v1alpha1"
 )
+
+// testRecorderBuffer is the capacity of fake event recorders used in controller tests.
+const testRecorderBuffer = 10000
+
+// testMCPDialerNoop succeeds without dialing; used so envtests do not run real MCP handshakes.
+func testMCPDialerNoop(context.Context, string) error {
+	return nil
+}
+
+func newReconcilerForTestWithFakeEvents(cli client.Client, sch *runtime.Scheme) (*MCPServerReconciler, *events.FakeRecorder) {
+	fr := events.NewFakeRecorder(testRecorderBuffer)
+	return &MCPServerReconciler{
+		Client:    cli,
+		Scheme:    sch,
+		Recorder:  fr,
+		MCPDialer: testMCPDialerNoop,
+	}, fr
+}
+
+func newReconcilerForTest(cli client.Client, sch *runtime.Scheme) *MCPServerReconciler {
+	r, _ := newReconcilerForTestWithFakeEvents(cli, sch)
+	return r
+}
 
 // newTestMCPServer returns an MCPServer with standard test defaults:
 // namespace "default", SourceTypeContainerImage with ref
@@ -95,10 +120,7 @@ var _ = Describe("MCPServer Controller", func() {
 		})
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
-			controllerReconciler := &MCPServerReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
+			controllerReconciler := newReconcilerForTest(k8sClient, k8sClient.Scheme())
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: typeNamespacedName,
@@ -106,6 +128,28 @@ var _ = Describe("MCPServer Controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 			// TODO(user): Add more specific assertions depending on your controller's reconciliation logic.
 			// Example: If you expect a certain status condition after reconciliation, verify it here.
+		})
+
+		It("should emit a Normal Accepted configuration event only when Accepted transitions to True", func() {
+			controllerReconciler, fr := newReconcilerForTestWithFakeEvents(k8sClient, k8sClient.Scheme())
+
+			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: typeNamespacedName,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			var first string
+			Eventually(fr.Events).Should(Receive(&first))
+			Expect(first).To(ContainSubstring(corev1.EventTypeNormal))
+			Expect(first).To(ContainSubstring(ReasonValid))
+			Expect(first).To(ContainSubstring("Accepted=True"))
+
+			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: typeNamespacedName,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			Consistently(fr.Events, 300*time.Millisecond, 20*time.Millisecond).ShouldNot(Receive())
 		})
 	})
 
@@ -136,10 +180,7 @@ var _ = Describe("MCPServer Controller", func() {
 		})
 
 		It("should propagate env vars to the deployment", func() {
-			controllerReconciler := &MCPServerReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
+			controllerReconciler := newReconcilerForTest(k8sClient, k8sClient.Scheme())
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: typeNamespacedName,
@@ -162,10 +203,7 @@ var _ = Describe("MCPServer Controller", func() {
 		})
 
 		It("should update deployment env vars when CR is changed", func() {
-			controllerReconciler := &MCPServerReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
+			controllerReconciler := newReconcilerForTest(k8sClient, k8sClient.Scheme())
 
 			By("Reconciling to create the initial deployment")
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
@@ -226,10 +264,7 @@ var _ = Describe("MCPServer Controller", func() {
 			resource.Spec.Config.Arguments = []string{"--verbose", "--port=8080"}
 			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 
-			controllerReconciler := &MCPServerReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
+			controllerReconciler := newReconcilerForTest(k8sClient, k8sClient.Scheme())
 
 			By("Reconciling to create the initial deployment with args")
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
@@ -293,10 +328,7 @@ var _ = Describe("MCPServer Controller", func() {
 			}
 			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 
-			controllerReconciler := &MCPServerReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
+			controllerReconciler := newReconcilerForTest(k8sClient, k8sClient.Scheme())
 
 			By("Reconciling to create the initial deployment with serviceAccountName")
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
@@ -368,10 +400,7 @@ var _ = Describe("MCPServer Controller", func() {
 			}
 			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 
-			controllerReconciler := &MCPServerReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
+			controllerReconciler := newReconcilerForTest(k8sClient, k8sClient.Scheme())
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: typeNamespacedName,
 			})
@@ -404,10 +433,7 @@ var _ = Describe("MCPServer Controller", func() {
 			}
 			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 
-			controllerReconciler := &MCPServerReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
+			controllerReconciler := newReconcilerForTest(k8sClient, k8sClient.Scheme())
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: typeNamespacedName,
 			})
@@ -444,10 +470,7 @@ var _ = Describe("MCPServer Controller", func() {
 			}
 			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 
-			controllerReconciler := &MCPServerReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
+			controllerReconciler := newReconcilerForTest(k8sClient, k8sClient.Scheme())
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: typeNamespacedName,
 			})
@@ -474,10 +497,7 @@ var _ = Describe("MCPServer Controller", func() {
 			resource := newTestMCPServer(resourceName + "-none")
 			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 
-			controllerReconciler := &MCPServerReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
+			controllerReconciler := newReconcilerForTest(k8sClient, k8sClient.Scheme())
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: types.NamespacedName{Name: resourceName + "-none", Namespace: "default"},
 			})
@@ -536,10 +556,7 @@ var _ = Describe("MCPServer Controller", func() {
 			resource.Spec.Runtime.Replicas = ptr.To(int32(3))
 			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 
-			controllerReconciler := &MCPServerReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
+			controllerReconciler := newReconcilerForTest(k8sClient, k8sClient.Scheme())
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: typeNamespacedName,
 			})
@@ -559,10 +576,7 @@ var _ = Describe("MCPServer Controller", func() {
 			resource := newTestMCPServer(resourceName)
 			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 
-			controllerReconciler := &MCPServerReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
+			controllerReconciler := newReconcilerForTest(k8sClient, k8sClient.Scheme())
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: typeNamespacedName,
 			})
@@ -582,10 +596,7 @@ var _ = Describe("MCPServer Controller", func() {
 			resource.Spec.Runtime.Replicas = ptr.To(int32(0))
 			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 
-			controllerReconciler := &MCPServerReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
+			controllerReconciler := newReconcilerForTest(k8sClient, k8sClient.Scheme())
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: typeNamespacedName,
 			})
@@ -605,10 +616,7 @@ var _ = Describe("MCPServer Controller", func() {
 			resource.Spec.Runtime.Replicas = ptr.To(int32(2))
 			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 
-			controllerReconciler := &MCPServerReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
+			controllerReconciler := newReconcilerForTest(k8sClient, k8sClient.Scheme())
 
 			By("Reconciling to create the initial deployment with 2 replicas")
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
@@ -649,10 +657,7 @@ var _ = Describe("MCPServer Controller", func() {
 			resource.Spec.Runtime.Replicas = ptr.To(int32(3))
 			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 
-			controllerReconciler := &MCPServerReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
+			controllerReconciler := newReconcilerForTest(k8sClient, k8sClient.Scheme())
 
 			By("Reconciling to create the initial deployment with 3 replicas")
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
@@ -693,11 +698,7 @@ var _ = Describe("MCPServer Controller", func() {
 			resource.Spec.Runtime.Replicas = ptr.To(int32(1))
 			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 
-			controllerReconciler := &MCPServerReconciler{
-				Client:    k8sClient,
-				Scheme:    k8sClient.Scheme(),
-				MCPDialer: func(ctx context.Context, url string) error { return nil },
-			}
+			controllerReconciler := newReconcilerForTest(k8sClient, k8sClient.Scheme())
 
 			By("Initial reconciliation creates deployment with 1 replica")
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
@@ -797,10 +798,7 @@ var _ = Describe("MCPServer Controller", func() {
 		})
 
 		It("should requeue reconciliation when Deployment is unavailable", func() {
-			controllerReconciler := &MCPServerReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
+			controllerReconciler := newReconcilerForTest(k8sClient, k8sClient.Scheme())
 
 			By("Initial reconciliation creates deployment")
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
@@ -844,11 +842,7 @@ var _ = Describe("MCPServer Controller", func() {
 		})
 
 		It("should NOT requeue when Deployment becomes available", func() {
-			controllerReconciler := &MCPServerReconciler{
-				Client:    k8sClient,
-				Scheme:    k8sClient.Scheme(),
-				MCPDialer: func(ctx context.Context, url string) error { return nil },
-			}
+			controllerReconciler := newReconcilerForTest(k8sClient, k8sClient.Scheme())
 
 			By("Initial reconciliation creates deployment")
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
@@ -896,11 +890,7 @@ var _ = Describe("MCPServer Controller", func() {
 		})
 
 		It("should eventually reach Ready=True after Deployment becomes available", func() {
-			controllerReconciler := &MCPServerReconciler{
-				Client:    k8sClient,
-				Scheme:    k8sClient.Scheme(),
-				MCPDialer: func(ctx context.Context, url string) error { return nil },
-			}
+			controllerReconciler := newReconcilerForTest(k8sClient, k8sClient.Scheme())
 
 			By("Initial reconciliation creates deployment")
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
@@ -1027,10 +1017,7 @@ var _ = Describe("MCPServer Controller", func() {
 		})
 
 		It("should propagate envFrom to the deployment", func() {
-			controllerReconciler := &MCPServerReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
+			controllerReconciler := newReconcilerForTest(k8sClient, k8sClient.Scheme())
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: typeNamespacedName,
@@ -1065,10 +1052,7 @@ var _ = Describe("MCPServer Controller", func() {
 			}
 			Expect(k8sClient.Update(ctx, mcpServer)).To(Succeed())
 
-			controllerReconciler := &MCPServerReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
+			controllerReconciler := newReconcilerForTest(k8sClient, k8sClient.Scheme())
 
 			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: typeNamespacedName,
@@ -1120,10 +1104,7 @@ var _ = Describe("MCPServer Controller", func() {
 		})
 
 		It("should set Accepted=False when envFrom references a missing ConfigMap", func() {
-			controllerReconciler := &MCPServerReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
+			controllerReconciler, fr := newReconcilerForTestWithFakeEvents(k8sClient, k8sClient.Scheme())
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: typeNamespacedName,
@@ -1142,6 +1123,12 @@ var _ = Describe("MCPServer Controller", func() {
 			// Verify MCPServer status has correct conditions
 			mcpServer := &mcpv1alpha1.MCPServer{}
 			Expect(k8sClient.Get(ctx, typeNamespacedName, mcpServer)).To(Succeed())
+
+			var ev string
+			Eventually(fr.Events).Should(Receive(&ev))
+			Expect(ev).To(ContainSubstring(corev1.EventTypeWarning))
+			Expect(ev).To(ContainSubstring(ReasonInvalid))
+			Expect(ev).To(ContainSubstring("nonexistent-configmap"))
 
 			acceptedCondition := meta.FindStatusCondition(mcpServer.Status.Conditions, "Accepted")
 			Expect(acceptedCondition).NotTo(BeNil())
@@ -1162,10 +1149,7 @@ var _ = Describe("MCPServer Controller", func() {
 			mcpServer.Spec.Config.EnvFrom[0].ConfigMapRef.Optional = &optional
 			Expect(k8sClient.Update(ctx, mcpServer)).To(Succeed())
 
-			controllerReconciler := &MCPServerReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
+			controllerReconciler := newReconcilerForTest(k8sClient, k8sClient.Scheme())
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: typeNamespacedName,
@@ -1209,10 +1193,7 @@ var _ = Describe("MCPServer Controller", func() {
 		})
 
 		It("should set Accepted=False when envFrom references a missing Secret", func() {
-			controllerReconciler := &MCPServerReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
+			controllerReconciler := newReconcilerForTest(k8sClient, k8sClient.Scheme())
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: typeNamespacedName,
@@ -1251,10 +1232,7 @@ var _ = Describe("MCPServer Controller", func() {
 			mcpServer.Spec.Config.EnvFrom[0].SecretRef.Optional = &optional
 			Expect(k8sClient.Update(ctx, mcpServer)).To(Succeed())
 
-			controllerReconciler := &MCPServerReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
+			controllerReconciler := newReconcilerForTest(k8sClient, k8sClient.Scheme())
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: typeNamespacedName,
@@ -1269,10 +1247,7 @@ var _ = Describe("MCPServer Controller", func() {
 		})
 
 		It("should preserve Accepted condition LastTransitionTime across reconciliations", func() {
-			controllerReconciler := &MCPServerReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
+			controllerReconciler := newReconcilerForTest(k8sClient, k8sClient.Scheme())
 
 			// First reconciliation - should set Accepted condition
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
@@ -1340,10 +1315,7 @@ var _ = Describe("MCPServer Controller", func() {
 		})
 
 		It("should set Accepted=False when env valueFrom references a missing ConfigMap", func() {
-			controllerReconciler := &MCPServerReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
+			controllerReconciler := newReconcilerForTest(k8sClient, k8sClient.Scheme())
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: typeNamespacedName,
@@ -1382,10 +1354,7 @@ var _ = Describe("MCPServer Controller", func() {
 			mcpServer.Spec.Config.Env[0].ValueFrom.ConfigMapKeyRef.Optional = &optional
 			Expect(k8sClient.Update(ctx, mcpServer)).To(Succeed())
 
-			controllerReconciler := &MCPServerReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
+			controllerReconciler := newReconcilerForTest(k8sClient, k8sClient.Scheme())
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: typeNamespacedName,
@@ -1435,10 +1404,7 @@ var _ = Describe("MCPServer Controller", func() {
 		})
 
 		It("should set Accepted=False when env valueFrom references a missing Secret", func() {
-			controllerReconciler := &MCPServerReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
+			controllerReconciler := newReconcilerForTest(k8sClient, k8sClient.Scheme())
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: typeNamespacedName,
@@ -1477,10 +1443,7 @@ var _ = Describe("MCPServer Controller", func() {
 			mcpServer.Spec.Config.Env[0].ValueFrom.SecretKeyRef.Optional = &optional
 			Expect(k8sClient.Update(ctx, mcpServer)).To(Succeed())
 
-			controllerReconciler := &MCPServerReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
+			controllerReconciler := newReconcilerForTest(k8sClient, k8sClient.Scheme())
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: typeNamespacedName,

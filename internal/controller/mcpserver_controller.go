@@ -41,6 +41,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	v1ac "k8s.io/client-go/applyconfigurations/meta/v1"
+	"k8s.io/client-go/tools/events"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -110,6 +111,12 @@ const (
 const (
 	// requeueDelayDeploymentUnavailable is the delay before requeuing when a deployment is not yet available.
 	requeueDelayDeploymentUnavailable = 15 * time.Second
+
+	// eventActionConfigurationValidation is the reporting action for configuration validation outcomes.
+	eventActionConfigurationValidation = "ConfigurationValidation"
+	// eventActionConfigurationAccepted is the reporting action when Accepted becomes True.
+	eventActionConfigurationAccepted = "ConfigurationAccepted"
+
 	// requeueDelayMCPHandshake is the initial delay before requeuing when an MCP handshake fails.
 	requeueDelayMCPHandshake = 10 * time.Second
 	// maxRequeueDelayMCPHandshake is the maximum requeue delay after exponential backoff.
@@ -138,6 +145,7 @@ const (
 type MCPServerReconciler struct {
 	client.Client
 	Scheme    *runtime.Scheme
+	Recorder  events.EventRecorder
 	MCPDialer func(ctx context.Context, url string) error // nil = use real MCP handshake
 }
 
@@ -148,6 +156,8 @@ type MCPServerReconciler struct {
 // +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
+// +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -171,6 +181,8 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	logger.Info("Reconciling MCPServer", "name", mcpServer.Name, "namespace", mcpServer.Namespace)
 
+	pendingAcceptedEvent := !acceptedConditionIsTrue(mcpServer.Status.Conditions)
+
 	// Validate configuration
 	validationStart := time.Now()
 	if err := r.validateConfig(ctx, mcpServer); err != nil {
@@ -178,52 +190,7 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 		var validationErr *ValidationError
 		if errors.As(err, &validationErr) {
-			// Permanent validation error - mark configuration as invalid
-			acceptedCondition := newCondition(
-				ConditionTypeAccepted,
-				metav1.ConditionFalse,
-				validationErr.Reason,
-				validationErr.Message,
-				mcpServer.Generation,
-			)
-			preserveLastTransitionTime(&acceptedCondition, mcpServer.Status.Conditions)
-
-			// Record Accepted condition metric
-			recordCondition(mcpServer.Name, mcpServer.Namespace,
-				acceptedCondition.Type, string(acceptedCondition.Status), acceptedCondition.Reason)
-
-			validationFailuresTotal.With(prometheus.Labels{
-				"name":      mcpServer.Name,
-				"namespace": mcpServer.Namespace,
-				"reason":    validationErr.Reason,
-			}).Inc()
-
-			readyCondition := newCondition(
-				ConditionTypeReady,
-				metav1.ConditionFalse,
-				ReasonConfigurationInvalid,
-				"Configuration must be fixed before server can start",
-				mcpServer.Generation,
-			)
-			preserveLastTransitionTime(&readyCondition, mcpServer.Status.Conditions)
-
-			status := acv1alpha1.MCPServerStatus().
-				WithObservedGeneration(mcpServer.Generation).
-				WithServiceName(mcpServer.Name).
-				WithConditions(
-					conditionToAC(acceptedCondition),
-					conditionToAC(readyCondition),
-				)
-
-			if err := r.applyStatus(ctx, mcpServer, status); err != nil {
-				logger.Error(err, "Failed to update MCPServer status")
-				return ctrl.Result{}, err
-			}
-
-			logger.Info("MCPServer configuration is invalid", "reason", validationErr.Reason)
-			recordCondition(mcpServer.Name, mcpServer.Namespace,
-				readyCondition.Type, string(readyCondition.Status), readyCondition.Reason)
-			return ctrl.Result{}, nil
+			return ctrl.Result{}, r.reconcilePermanentValidationError(ctx, mcpServer, validationErr)
 		}
 
 		// Transient error - log and return to trigger retry with exponential backoff
@@ -246,6 +213,11 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// Record Accepted condition metric
 	recordCondition(mcpServer.Name, mcpServer.Namespace,
 		acceptedCondition.Type, string(acceptedCondition.Status), acceptedCondition.Reason)
+
+	// Normal Event once per Accepted transition (single site); not transactional with applyStatus — PR #118.
+	if pendingAcceptedEvent {
+		r.emitConfigurationAccepted(mcpServer)
+	}
 
 	// Configuration is valid, proceed with deployment reconciliation
 	deploymentStart := time.Now()
@@ -1096,6 +1068,86 @@ func (r *MCPServerReconciler) validateOwnership(
 		obj.GetNamespace(), obj.GetName(),
 		controllerOwner.Kind, controllerOwner.Name, controllerOwner.UID,
 		mcpServer.Namespace, mcpServer.Name, mcpServer.UID)
+}
+
+func acceptedConditionIsTrue(conditions []metav1.Condition) bool {
+	c := meta.FindStatusCondition(conditions, ConditionTypeAccepted)
+	return c != nil && c.Status == metav1.ConditionTrue
+}
+
+func (r *MCPServerReconciler) reconcilePermanentValidationError(
+	ctx context.Context,
+	mcpServer *mcpv1alpha1.MCPServer,
+	validationErr *ValidationError,
+) error {
+	logger := log.FromContext(ctx)
+
+	acceptedCondition := newCondition(
+		ConditionTypeAccepted,
+		metav1.ConditionFalse,
+		validationErr.Reason,
+		validationErr.Message,
+		mcpServer.Generation,
+	)
+	preserveLastTransitionTime(&acceptedCondition, mcpServer.Status.Conditions)
+
+	recordCondition(mcpServer.Name, mcpServer.Namespace,
+		acceptedCondition.Type, string(acceptedCondition.Status), acceptedCondition.Reason)
+
+	validationFailuresTotal.With(prometheus.Labels{
+		"name":      mcpServer.Name,
+		"namespace": mcpServer.Namespace,
+		"reason":    validationErr.Reason,
+	}).Inc()
+
+	readyCondition := newCondition(
+		ConditionTypeReady,
+		metav1.ConditionFalse,
+		ReasonConfigurationInvalid,
+		"Configuration must be fixed before server can start",
+		mcpServer.Generation,
+	)
+	preserveLastTransitionTime(&readyCondition, mcpServer.Status.Conditions)
+
+	prevAccepted := meta.FindStatusCondition(mcpServer.Status.Conditions, ConditionTypeAccepted)
+
+	status := acv1alpha1.MCPServerStatus().
+		WithObservedGeneration(mcpServer.Generation).
+		WithServiceName(mcpServer.Name).
+		WithConditions(
+			conditionToAC(acceptedCondition),
+			conditionToAC(readyCondition),
+		)
+
+	if err := r.applyStatus(ctx, mcpServer, status); err != nil {
+		logger.Error(err, "Failed to update MCPServer status")
+		return err
+	}
+
+	duplicateInvalid := prevAccepted != nil && prevAccepted.Status == metav1.ConditionFalse &&
+		prevAccepted.Reason == validationErr.Reason && prevAccepted.Message == validationErr.Message
+	if !duplicateInvalid {
+		r.emitConfigurationInvalid(mcpServer, validationErr)
+	}
+
+	logger.Info("MCPServer configuration is invalid", "reason", validationErr.Reason)
+	recordCondition(mcpServer.Name, mcpServer.Namespace,
+		readyCondition.Type, string(readyCondition.Status), readyCondition.Reason)
+	return nil
+}
+
+func (r *MCPServerReconciler) emitConfigurationInvalid(mcpServer *mcpv1alpha1.MCPServer, validationErr *ValidationError) {
+	if r.Recorder == nil {
+		return
+	}
+	r.Recorder.Eventf(mcpServer, nil, corev1.EventTypeWarning, validationErr.Reason, eventActionConfigurationValidation, "%s", validationErr.Message)
+}
+
+func (r *MCPServerReconciler) emitConfigurationAccepted(mcpServer *mcpv1alpha1.MCPServer) {
+	if r.Recorder == nil {
+		return
+	}
+	r.Recorder.Eventf(mcpServer, nil, corev1.EventTypeNormal, ReasonValid, eventActionConfigurationAccepted, "%s", "MCPServer configuration is valid; Accepted=True")
 }
 
 func (r *MCPServerReconciler) applyStatus(
