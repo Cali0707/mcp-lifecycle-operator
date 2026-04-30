@@ -592,6 +592,19 @@ spec:
                   ExtraLabels are applied to the Deployment metadata, PodTemplate metadata, and Service metadata.
                   The operator-managed keys "app" and "mcp-server" cannot be overridden.
                 type: object
+              mcp:
+                description: |-
+                  MCP defines Model Context Protocol specific properties of the server.
+                  This section describes the MCP server's protocol-level behavior,
+                  as opposed to how it is sourced, configured, or managed at runtime.
+                properties:
+                  stateless:
+                    description: |-
+                      Stateless indicates whether the MCP server is stateless (does not maintain session state).
+                      Only set this to true if the MCP server you are deploying declares that it is stateless.
+                      Defaults to false (stateful)
+                    type: boolean
+                type: object
               runtime:
                 description: |-
                   Runtime defines runtime management configuration.

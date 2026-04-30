@@ -39,6 +39,10 @@ type MCPServerSpecApplyConfiguration struct {
 	// Runtime defines runtime management configuration.
 	// If not specified, default runtime settings will be applied.
 	Runtime *RuntimeConfigApplyConfiguration `json:"runtime,omitempty"`
+	// MCP defines Model Context Protocol specific properties of the server.
+	// This section describes the MCP server's protocol-level behavior,
+	// as opposed to how it is sourced, configured, or managed at runtime.
+	MCP *MCPConfigApplyConfiguration `json:"mcp,omitempty"`
 }
 
 // MCPServerSpecApplyConfiguration constructs a declarative configuration of the MCPServerSpec type for use with
@@ -96,5 +100,13 @@ func (b *MCPServerSpecApplyConfiguration) WithConfig(value *ServerConfigApplyCon
 // If called multiple times, the Runtime field is set to the value of the last call.
 func (b *MCPServerSpecApplyConfiguration) WithRuntime(value *RuntimeConfigApplyConfiguration) *MCPServerSpecApplyConfiguration {
 	b.Runtime = value
+	return b
+}
+
+// WithMCP sets the MCP field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the MCP field is set to the value of the last call.
+func (b *MCPServerSpecApplyConfiguration) WithMCP(value *MCPConfigApplyConfiguration) *MCPServerSpecApplyConfiguration {
+	b.MCP = value
 	return b
 }

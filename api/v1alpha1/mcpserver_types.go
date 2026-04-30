@@ -355,6 +355,24 @@ type MCPServerSpec struct {
 	// If not specified, default runtime settings will be applied.
 	// +optional
 	Runtime RuntimeConfig `json:"runtime,omitzero"`
+
+	// MCP defines Model Context Protocol specific properties of the server.
+	// This section describes the MCP server's protocol-level behavior,
+	// as opposed to how it is sourced, configured, or managed at runtime.
+	// +optional
+	MCP MCPConfig `json:"mcp,omitempty"`
+}
+
+// MCPConfig defines Model Context Protocol specific properties of the server.
+// This section captures how the server behaves as an MCP server, such as whether
+// it maintains session state. These properties are distinct from container configuration
+// (config), deployment management (runtime), and image sourcing (source).
+type MCPConfig struct {
+	// Stateless indicates whether the MCP server is stateless (does not maintain session state).
+	// Only set this to true if the MCP server you are deploying declares that it is stateless.
+	// Defaults to false (stateful)
+	// +optional
+	Stateless *bool `json:"stateless,omitempty"`
 }
 
 // MCPServerAddress contains the address information for the MCPServer.
