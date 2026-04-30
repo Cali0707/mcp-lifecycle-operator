@@ -34,6 +34,10 @@ type MCPServerSpecApplyConfiguration struct {
 	// Runtime defines runtime management configuration.
 	// If not specified, default runtime settings will be applied.
 	Runtime *RuntimeConfigApplyConfiguration `json:"runtime,omitempty"`
+	// Stateless indicates whether the MCP server is stateless (does not maintain session state).
+	// Only set this to true if the MCP server you are deploying declares that it is stateless.
+	// Defaults to false (stateful)
+	Stateless *bool `json:"stateless,omitempty"`
 }
 
 // MCPServerSpecApplyConfiguration constructs a declarative configuration of the MCPServerSpec type for use with
@@ -63,5 +67,13 @@ func (b *MCPServerSpecApplyConfiguration) WithConfig(value *ServerConfigApplyCon
 // If called multiple times, the Runtime field is set to the value of the last call.
 func (b *MCPServerSpecApplyConfiguration) WithRuntime(value *RuntimeConfigApplyConfiguration) *MCPServerSpecApplyConfiguration {
 	b.Runtime = value
+	return b
+}
+
+// WithStateless sets the Stateless field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Stateless field is set to the value of the last call.
+func (b *MCPServerSpecApplyConfiguration) WithStateless(value bool) *MCPServerSpecApplyConfiguration {
+	b.Stateless = &value
 	return b
 }

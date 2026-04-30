@@ -1527,6 +1527,12 @@ spec:
                     and must not be set otherwise
                   rule: 'self.type == ''ContainerImage'' ? has(self.containerImage)
                     : !has(self.containerImage)'
+              stateless:
+                description: |-
+                  Stateless indicates whether the MCP server is stateless (does not maintain session state).
+                  Only set this to true if the MCP server you are deploying declares that it is stateless.
+                  Defaults to false (stateful)
+                type: boolean
             required:
             - config
             - source

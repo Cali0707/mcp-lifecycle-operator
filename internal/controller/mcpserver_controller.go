@@ -1001,7 +1001,6 @@ func (r *MCPServerReconciler) createService(mcpServer *mcpv1alpha1.MCPServer) *c
 			Selector: map[string]string{
 				"mcp-server": mcpServer.Name,
 			},
-			SessionAffinity: corev1.ServiceAffinityClientIP,
 			Ports: []corev1.ServicePort{
 				{
 					Name:       "mcp",
@@ -1011,6 +1010,12 @@ func (r *MCPServerReconciler) createService(mcpServer *mcpv1alpha1.MCPServer) *c
 				},
 			},
 		},
+	}
+
+	if mcpServer.Spec.Stateless != nil && *mcpServer.Spec.Stateless {
+		service.Spec.SessionAffinity = corev1.ServiceAffinityNone
+	} else {
+		service.Spec.SessionAffinity = corev1.ServiceAffinityClientIP
 	}
 
 	return service

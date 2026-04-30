@@ -348,6 +348,12 @@ type MCPServerSpec struct {
 	// If not specified, default runtime settings will be applied.
 	// +optional
 	Runtime RuntimeConfig `json:"runtime,omitzero"`
+
+	// Stateless indicates whether the MCP server is stateless (does not maintain session state).
+	// Only set this to true if the MCP server you are deploying declares that it is stateless.
+	// Defaults to false (stateful)
+	// +optional
+	Stateless *bool `json:"stateless,omitempty"`
 }
 
 // MCPServerAddress contains the address information for the MCPServer.
