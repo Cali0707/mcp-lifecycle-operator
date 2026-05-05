@@ -29,7 +29,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -232,7 +231,7 @@ var _ = Describe("MCPServer Controller - MCP Handshake Validation", func() {
 		By("Setting replicas to 0")
 		mcpServer := &mcpv1alpha1.MCPServer{}
 		Expect(k8sClient.Get(ctx, typeNamespacedName, mcpServer)).To(Succeed())
-		mcpServer.Spec.Runtime.Replicas = ptr.To(int32(0))
+		mcpServer.Spec.Runtime.Replicas = new(int32(0))
 		Expect(k8sClient.Update(ctx, mcpServer)).To(Succeed())
 
 		By("Initial reconciliation creates deployment")

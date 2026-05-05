@@ -29,7 +29,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -789,7 +788,7 @@ var _ = Describe("MCPServer Controller - Storage Mounts", func() {
 							LocalObjectReference: corev1.LocalObjectReference{
 								Name: "optional-configmap",
 							},
-							Optional: ptr.To(true),
+							Optional: new(true),
 						},
 					},
 				},
@@ -852,7 +851,7 @@ var _ = Describe("MCPServer Controller - Storage Mounts", func() {
 						Type: mcpv1alpha1.StorageTypeSecret,
 						Secret: &corev1.SecretVolumeSource{
 							SecretName: "optional-secret",
-							Optional:   ptr.To(true),
+							Optional:   new(true),
 						},
 					},
 				},

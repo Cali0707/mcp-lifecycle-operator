@@ -29,7 +29,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -109,7 +108,7 @@ var _ = Describe("MCPServer Controller - reconcileDeployment", func() {
 						Kind:       "MCPServer",
 						Name:       "test-empty-containers",
 						UID:        "fake-uid",
-						Controller: ptr.To(true),
+						Controller: new(true),
 					},
 				},
 			},

@@ -32,7 +32,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/events"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -553,7 +552,7 @@ var _ = Describe("MCPServer Controller", func() {
 
 		It("should set replicas on deployment when specified", func() {
 			resource := newTestMCPServer(resourceName)
-			resource.Spec.Runtime.Replicas = ptr.To(int32(3))
+			resource.Spec.Runtime.Replicas = new(int32(3))
 			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 
 			controllerReconciler := newReconcilerForTest(k8sClient, k8sClient.Scheme())
@@ -593,7 +592,7 @@ var _ = Describe("MCPServer Controller", func() {
 
 		It("should allow 0 replicas for scale-to-zero", func() {
 			resource := newTestMCPServer(resourceName)
-			resource.Spec.Runtime.Replicas = ptr.To(int32(0))
+			resource.Spec.Runtime.Replicas = new(int32(0))
 			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 
 			controllerReconciler := newReconcilerForTest(k8sClient, k8sClient.Scheme())
@@ -613,7 +612,7 @@ var _ = Describe("MCPServer Controller", func() {
 
 		It("should update deployment when replicas changes", func() {
 			resource := newTestMCPServer(resourceName)
-			resource.Spec.Runtime.Replicas = ptr.To(int32(2))
+			resource.Spec.Runtime.Replicas = new(int32(2))
 			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 
 			controllerReconciler := newReconcilerForTest(k8sClient, k8sClient.Scheme())
@@ -635,7 +634,7 @@ var _ = Describe("MCPServer Controller", func() {
 			By("Updating replicas to 5")
 			mcpServer := &mcpv1alpha1.MCPServer{}
 			Expect(k8sClient.Get(ctx, typeNamespacedName, mcpServer)).To(Succeed())
-			mcpServer.Spec.Runtime.Replicas = ptr.To(int32(5))
+			mcpServer.Spec.Runtime.Replicas = new(int32(5))
 			Expect(k8sClient.Update(ctx, mcpServer)).To(Succeed())
 
 			By("Reconciling again to pick up the change")
@@ -654,7 +653,7 @@ var _ = Describe("MCPServer Controller", func() {
 
 		It("should update deployment when replicas is removed", func() {
 			resource := newTestMCPServer(resourceName)
-			resource.Spec.Runtime.Replicas = ptr.To(int32(3))
+			resource.Spec.Runtime.Replicas = new(int32(3))
 			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 
 			controllerReconciler := newReconcilerForTest(k8sClient, k8sClient.Scheme())
@@ -695,7 +694,7 @@ var _ = Describe("MCPServer Controller", func() {
 
 		It("should correctly handle MCPServer status after spec update", func() {
 			resource := newTestMCPServer(resourceName)
-			resource.Spec.Runtime.Replicas = ptr.To(int32(1))
+			resource.Spec.Runtime.Replicas = new(int32(1))
 			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 
 			controllerReconciler := newReconcilerForTest(k8sClient, k8sClient.Scheme())
@@ -743,7 +742,7 @@ var _ = Describe("MCPServer Controller", func() {
 			Expect(readyCondition.Reason).To(Equal(ReasonAvailable))
 
 			By("Updating replicas to 3")
-			mcpServer.Spec.Runtime.Replicas = ptr.To(int32(3))
+			mcpServer.Spec.Runtime.Replicas = new(int32(3))
 			Expect(k8sClient.Update(ctx, mcpServer)).To(Succeed())
 
 			By("Reconciling after spec update")

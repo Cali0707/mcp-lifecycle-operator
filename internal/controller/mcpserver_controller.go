@@ -970,7 +970,7 @@ func (r *MCPServerReconciler) processStorageMounts(
 			volumeMount.ReadOnly = false
 		case mcpv1alpha1.MountPermissionsRecursiveReadOnly:
 			volumeMount.ReadOnly = true
-			volumeMount.RecursiveReadOnly = ptr.To(corev1.RecursiveReadOnlyEnabled)
+			volumeMount.RecursiveReadOnly = new(corev1.RecursiveReadOnlyEnabled)
 		}
 
 		volumeMounts = append(volumeMounts, volumeMount)
@@ -1279,9 +1279,9 @@ func preserveLastTransitionTime(condition *metav1.Condition, existingConditions 
 // security context applied to MCP server containers by default.
 func defaultContainerSecurityContext() *corev1.SecurityContext {
 	return &corev1.SecurityContext{
-		AllowPrivilegeEscalation: ptr.To(false),
-		ReadOnlyRootFilesystem:   ptr.To(true),
-		RunAsNonRoot:             ptr.To(true),
+		AllowPrivilegeEscalation: new(false),
+		ReadOnlyRootFilesystem:   new(true),
+		RunAsNonRoot:             new(true),
 		Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
 		SeccompProfile:           &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
 	}

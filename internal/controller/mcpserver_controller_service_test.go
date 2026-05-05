@@ -27,7 +27,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -58,7 +57,7 @@ var _ = Describe("MCPServer Controller - Address URL", func() {
 
 		It("should set the address URL with default path after reconciliation", func() {
 			resource := newTestMCPServer(resourceName)
-			resource.Spec.Runtime.Replicas = ptr.To(int32(1))
+			resource.Spec.Runtime.Replicas = new(int32(1))
 			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 
 			controllerReconciler := &MCPServerReconciler{
@@ -118,7 +117,7 @@ var _ = Describe("MCPServer Controller - Address URL", func() {
 
 		It("should persist the address URL across reconciliations", func() {
 			resource := newTestMCPServer(resourceName)
-			resource.Spec.Runtime.Replicas = ptr.To(int32(1))
+			resource.Spec.Runtime.Replicas = new(int32(1))
 			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 
 			controllerReconciler := &MCPServerReconciler{

@@ -26,7 +26,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -187,7 +186,7 @@ var _ = Describe("MCPServer Controller - Foreign Owned Resources", func() {
 							Kind:       "SomeOtherController",
 							Name:       "foreign-owner",
 							UID:        types.UID("foreign-controller-uid"),
-							Controller: ptr.To(true),
+							Controller: new(true),
 						},
 					},
 				},
@@ -275,7 +274,7 @@ var _ = Describe("MCPServer Controller - Foreign Owned Resources", func() {
 							Kind:       "SomeOtherController",
 							Name:       "foreign-svc-owner",
 							UID:        types.UID("foreign-svc-controller-uid"),
-							Controller: ptr.To(true),
+							Controller: new(true),
 						},
 					},
 				},
@@ -520,14 +519,14 @@ var _ = Describe("MCPServer Controller - Foreign Owned Resources", func() {
 							Kind:       "MCPServer",
 							Name:       "some-other-server",
 							UID:        types.UID("other-mcpserver-uid"),
-							Controller: ptr.To(false), // Not a controller
+							Controller: new(false), // Not a controller
 						},
 						{
 							APIVersion: "apps/v1",
 							Kind:       "ReplicaSet",
 							Name:       "some-replicaset",
 							UID:        types.UID("replicaset-uid"),
-							Controller: ptr.To(false), // Also not a controller
+							Controller: new(false), // Also not a controller
 						},
 					},
 				},
@@ -628,14 +627,14 @@ var _ = Describe("MCPServer Controller - Foreign Owned Resources", func() {
 							Kind:       "MCPServer",
 							Name:       "some-other-server",
 							UID:        types.UID("other-mcpserver-uid"),
-							Controller: ptr.To(false), // Not a controller
+							Controller: new(false), // Not a controller
 						},
 						{
 							APIVersion: "v1",
 							Kind:       "ConfigMap",
 							Name:       "some-config",
 							UID:        types.UID("config-uid"),
-							Controller: ptr.To(false), // Also not a controller
+							Controller: new(false), // Also not a controller
 						},
 					},
 				},
