@@ -107,6 +107,19 @@ const (
 	ReasonMCPEndpointUnavailable = "MCPEndpointUnavailable"
 )
 
+// Container waiting reasons from Kubernetes pod status.
+const (
+	WaitingReasonImagePullBackOff           = "ImagePullBackOff"
+	WaitingReasonErrImagePull               = "ErrImagePull"
+	WaitingReasonCrashLoopBackOff           = "CrashLoopBackOff"
+	WaitingReasonCreateContainerConfigError = "CreateContainerConfigError"
+)
+
+// Container terminated reasons from Kubernetes pod status.
+const (
+	TerminatedReasonOOMKilled = "OOMKilled"
+)
+
 // Reconciliation constants.
 const (
 	// requeueDelayDeploymentUnavailable is the delay before requeuing when a deployment is not yet available.
@@ -164,6 +177,7 @@ type MCPServerReconciler struct {
 // +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=pods,verbs=get;list
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 // +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch
 
@@ -304,7 +318,8 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// Determine Ready condition based on deployment status
 	reconcileDuration.With(prometheus.Labels{"phase": "service"}).Observe(time.Since(serviceStart).Seconds())
 
-	readyCondition := determineReadyCondition(
+	readyCondition := r.reconcileReadyCondition(
+		ctx,
 		existingDeployment,
 		acceptedCondition,
 		mcpServer.Generation,
@@ -559,140 +574,199 @@ func isHTTPAuthError(err error) bool {
 		strings.HasSuffix(msg, ": "+http.StatusText(http.StatusForbidden))
 }
 
-// determineReadyCondition analyzes deployment status and accepted condition to determine
-// the Ready condition.
-func determineReadyCondition(
+// deploymentState summarises the health signals from a Deployment's status conditions.
+type deploymentState struct {
+	available      bool
+	progressing    bool
+	replicaFailure bool
+	message        string // most relevant message from unhealthy conditions
+}
+
+// extractDeploymentState reads the standard Deployment condition types and
+// returns a compact summary used by reconcileReadyCondition.
+func extractDeploymentState(deployment *appsv1.Deployment) deploymentState {
+	var state deploymentState
+	var progressingMessage string
+	var availableMessage string
+	for _, cond := range deployment.Status.Conditions {
+		switch cond.Type {
+		case appsv1.DeploymentAvailable:
+			state.available = cond.Status == corev1.ConditionTrue
+			if cond.Status == corev1.ConditionFalse {
+				availableMessage = cond.Message
+			}
+		case appsv1.DeploymentProgressing:
+			state.progressing = cond.Status == corev1.ConditionTrue
+			if cond.Status == corev1.ConditionFalse {
+				progressingMessage = cond.Message
+			}
+		case appsv1.DeploymentReplicaFailure:
+			if cond.Status == corev1.ConditionTrue {
+				state.replicaFailure = true
+				if cond.Message != "" {
+					state.message = cond.Message
+				}
+			}
+		}
+	}
+
+	// Prefer ReplicaFailure message; fall back to Progressing, then Available.
+	if state.message == "" {
+		state.message = progressingMessage
+	}
+	if state.message == "" {
+		state.message = availableMessage
+	}
+
+	return state
+}
+
+// analyzePodFailures inspects pod container statuses to build a human-readable
+// message describing why pods are unhealthy. Returns "" if no specific failure
+// can be identified. Only the first failure across all pods is returned to keep
+// the status condition message concise.
+func analyzePodFailures(pods []corev1.Pod) string {
+	for _, pod := range pods {
+		for _, cs := range pod.Status.InitContainerStatuses {
+			if msg := analyzeContainerStatus(cs, pod.Name); msg != "" {
+				return msg
+			}
+		}
+
+		for _, cs := range pod.Status.ContainerStatuses {
+			if msg := analyzeContainerStatus(cs, pod.Name); msg != "" {
+				return msg
+			}
+		}
+	}
+
+	return ""
+}
+
+// analyzeContainerStatus checks a single container status for known failure
+// patterns and returns a human-readable message, or "" if none is found.
+func analyzeContainerStatus(cs corev1.ContainerStatus, podName string) string {
+	if w := cs.State.Waiting; w != nil {
+		switch w.Reason {
+		case WaitingReasonImagePullBackOff, WaitingReasonErrImagePull:
+			return fmt.Sprintf("Image pull failed for %q: %s (pod: %s)", cs.Image, w.Message, podName)
+		case WaitingReasonCrashLoopBackOff:
+			if t := cs.LastTerminationState.Terminated; t != nil {
+				return fmt.Sprintf("Container crashing: exit code %d, restarts: %d (pod: %s)",
+					t.ExitCode, cs.RestartCount, podName)
+			}
+			return fmt.Sprintf("Container crashing: restarts: %d (pod: %s)",
+				cs.RestartCount, podName)
+		case WaitingReasonCreateContainerConfigError:
+			return fmt.Sprintf("Container config error: %s (pod: %s)", w.Message, podName)
+		}
+	}
+	if t := cs.State.Terminated; t != nil {
+		if t.Reason == TerminatedReasonOOMKilled {
+			return fmt.Sprintf("Container OOMKilled: exit code %d, restarts: %d (pod: %s)",
+				t.ExitCode, cs.RestartCount, podName)
+		}
+	}
+	// Running but not ready with restarts indicates a probe failure.
+	// We require RestartCount > 0 to avoid false positives during initial startup
+	// when the readiness probe hasn't passed yet.
+	if cs.State.Running != nil && !cs.Ready && cs.RestartCount > 0 {
+		return fmt.Sprintf("Container not passing health checks: restarts: %d (pod: %s)",
+			cs.RestartCount, podName)
+	}
+	return ""
+}
+
+// reconcileReadyCondition determines the Ready condition for an MCPServer by
+// inspecting deployment status. When the deployment is in a failure state, it
+// fetches pods to surface specific error details (image pull failures, crash
+// loops, OOM, etc.) rather than showing generic deployment messages.
+func (r *MCPServerReconciler) reconcileReadyCondition(
+	ctx context.Context,
 	deployment *appsv1.Deployment,
 	acceptedCondition metav1.Condition,
 	generation int64,
 	existingConditions []metav1.Condition,
 ) metav1.Condition {
-	// If configuration is not accepted, Ready=False
 	if acceptedCondition.Status == metav1.ConditionFalse {
-		condition := newCondition(
-			ConditionTypeReady,
-			metav1.ConditionFalse,
-			ReasonConfigurationInvalid,
-			"Configuration must be fixed before server can start",
-			generation,
-		)
-		preserveLastTransitionTime(&condition, existingConditions)
-		return condition
+		return newReadyCondition(metav1.ConditionFalse, ReasonConfigurationInvalid,
+			"Configuration must be fixed before server can start", generation, existingConditions)
 	}
 
-	// Check if scaled to zero
-	// Note: Following Kubernetes Deployment semantics, we set Ready=True when scaled to 0.
 	// Scaling to zero is an intentional, valid desired state (not a failure).
-	// This prevents false alerts and aligns with core K8s resource conventions where
-	// conditions indicate "is the system in its desired state?" rather than "is it doing work?".
-	// Users can check the ScaledToZero reason or status.replicas for operational state.
 	if deployment.Spec.Replicas != nil && *deployment.Spec.Replicas == 0 {
-		condition := newCondition(
-			ConditionTypeReady,
-			metav1.ConditionTrue,
-			ReasonScaledToZero,
-			"Server is ready (scaled to 0 replicas)",
-			generation,
-		)
-		preserveLastTransitionTime(&condition, existingConditions)
-		return condition
+		return newReadyCondition(metav1.ConditionTrue, ReasonScaledToZero,
+			"Server is ready (scaled to 0 replicas)", generation, existingConditions)
 	}
 
-	// Extract deployment conditions
-	deploymentAvailable := false
-	deploymentProgressing := false
-	deploymentReplicaFailure := false
-	var deploymentMessage string
+	if len(deployment.Status.Conditions) == 0 && deployment.Status.ReadyReplicas == 0 {
+		return newReadyCondition(metav1.ConditionUnknown, ReasonInitializing,
+			"Waiting for Deployment to report status", generation, existingConditions)
+	}
 
-	for _, cond := range deployment.Status.Conditions {
-		switch cond.Type {
-		case appsv1.DeploymentAvailable:
-			if cond.Status == corev1.ConditionTrue {
-				deploymentAvailable = true
-			}
-		case appsv1.DeploymentProgressing:
-			if cond.Status == corev1.ConditionTrue {
-				deploymentProgressing = true
-			}
-			if cond.Status == corev1.ConditionFalse {
-				deploymentMessage = cond.Message
-			}
-		case appsv1.DeploymentReplicaFailure:
-			if cond.Status == corev1.ConditionTrue {
-				deploymentReplicaFailure = true
-				deploymentMessage = cond.Message
+	state := extractDeploymentState(deployment)
+
+	if deployment.Status.ObservedGeneration > 0 && deployment.Status.ObservedGeneration < deployment.Generation {
+		return newReadyCondition(metav1.ConditionFalse, ReasonDeploymentUnavailable,
+			"Deployment is processing spec update", generation, existingConditions)
+	}
+
+	if state.available && deployment.Status.ReadyReplicas > 0 {
+		return newReadyCondition(metav1.ConditionTrue, ReasonAvailable,
+			fmt.Sprintf("MCP server is ready (%d of %d instances healthy)",
+				deployment.Status.ReadyReplicas, ptr.Deref(deployment.Spec.Replicas, 1)),
+			generation, existingConditions)
+	}
+
+	// Failure path — fetch pods for detailed diagnostics.
+	podFailureMessage := r.getPodFailureMessage(ctx, deployment)
+	if state.replicaFailure ||
+		(!state.progressing && !state.available) ||
+		(state.progressing && deployment.Status.ReadyReplicas == 0 && podFailureMessage != "") {
+		if podFailureMessage == "" {
+			podFailureMessage = "No healthy instances (pod details unavailable)"
+			if state.message != "" {
+				podFailureMessage = podFailureMessage + ": " + state.message
 			}
 		}
+
+		return newReadyCondition(metav1.ConditionFalse, ReasonDeploymentUnavailable,
+			podFailureMessage, generation, existingConditions)
 	}
 
-	// Deployment has no status yet
-	if len(deployment.Status.Conditions) == 0 && deployment.Status.ReadyReplicas == 0 {
-		condition := newCondition(
-			ConditionTypeReady,
-			metav1.ConditionUnknown,
-			ReasonInitializing,
-			"Waiting for Deployment to report status",
-			generation,
-		)
-		preserveLastTransitionTime(&condition, existingConditions)
-		return condition
+	return newReadyCondition(metav1.ConditionFalse, ReasonDeploymentUnavailable,
+		"Waiting for instances to become healthy", generation, existingConditions)
+}
+
+// getPodFailureMessage lists the pods for a deployment and returns a detailed
+// message from their container statuses. Returns "" when pod details are
+// unavailable or no known failure pattern is found.
+func (r *MCPServerReconciler) getPodFailureMessage(
+	ctx context.Context,
+	deployment *appsv1.Deployment,
+) string {
+	logger := log.FromContext(ctx)
+
+	if deployment.Spec.Selector == nil {
+		return ""
 	}
 
-	// Deployment hasn't processed the latest spec yet
-	// Only check if ObservedGeneration is non-zero (0 is the initial state)
-	if deployment.Status.ObservedGeneration > 0 && deployment.Status.ObservedGeneration < deployment.Generation {
-		condition := newCondition(
-			ConditionTypeReady,
-			metav1.ConditionFalse,
-			ReasonDeploymentUnavailable,
-			"Deployment is processing spec update",
-			generation,
-		)
-		preserveLastTransitionTime(&condition, existingConditions)
-		return condition
+	selector, err := metav1.LabelSelectorAsSelector(deployment.Spec.Selector)
+	if err != nil {
+		logger.Error(err, "Failed to parse deployment selector")
+		return ""
 	}
 
-	// At least one replica is ready - SUCCESS
-	if deploymentAvailable && deployment.Status.ReadyReplicas > 0 {
-		message := fmt.Sprintf("MCP server is ready (%d of %d instances healthy)",
-			deployment.Status.ReadyReplicas,
-			ptr.Deref(deployment.Spec.Replicas, 1))
-		condition := newCondition(
-			ConditionTypeReady,
-			metav1.ConditionTrue,
-			ReasonAvailable,
-			message,
-			generation,
-		)
-		preserveLastTransitionTime(&condition, existingConditions)
-		return condition
+	podList := &corev1.PodList{}
+	if err := r.List(ctx, podList,
+		client.InNamespace(deployment.Namespace),
+		client.MatchingLabelsSelector{Selector: selector},
+	); err != nil {
+		logger.Error(err, "Failed to list pods for deployment failure analysis")
+		return ""
 	}
 
-	// Deployment exists but no replicas ready - FAILURE
-	// This covers: ImagePullBackOff, CrashLoop, OOM, Security errors, Probe failures, etc.
-	if deploymentReplicaFailure || (!deploymentProgressing && !deploymentAvailable) {
-		message := analyzeDeploymentFailure(deploymentMessage)
-		condition := newCondition(
-			ConditionTypeReady,
-			metav1.ConditionFalse,
-			ReasonDeploymentUnavailable,
-			message,
-			generation,
-		)
-		preserveLastTransitionTime(&condition, existingConditions)
-		return condition
-	}
-
-	// Still progressing (no replicas ready yet)
-	condition := newCondition(
-		ConditionTypeReady,
-		metav1.ConditionFalse,
-		ReasonDeploymentUnavailable,
-		"Waiting for instances to become healthy",
-		generation,
-	)
-	preserveLastTransitionTime(&condition, existingConditions)
-	return condition
+	return analyzePodFailures(podList.Items)
 }
 
 // reconcileDeployment creates or updates the Deployment for the MCPServer
@@ -1327,35 +1401,18 @@ func newCondition(
 	}
 }
 
-// analyzeDeploymentFailure examines the deployment message to build a detailed message
-// about why pods are not healthy. Returns a message with specifics.
-func analyzeDeploymentFailure(deploymentMessage string) string {
-	if deploymentMessage == "" {
-		return "No healthy instances available"
-	}
-
-	// Extract the most relevant error information
-	msg := deploymentMessage
-
-	// Common patterns - extract the key info
-	if strings.Contains(msg, "ImagePullBackOff") || strings.Contains(msg, "ErrImagePull") {
-		return fmt.Sprintf("No healthy instances: ImagePullBackOff - %s", msg)
-	}
-	if strings.Contains(msg, "runAsNonRoot") || strings.Contains(msg, "CreateContainerConfigError") {
-		return fmt.Sprintf("No healthy instances: CreateContainerConfigError - %s", msg)
-	}
-	if strings.Contains(msg, "OOMKilled") {
-		return fmt.Sprintf("No healthy instances: OOMKilled - %s", msg)
-	}
-	if strings.Contains(msg, "CrashLoopBackOff") {
-		return fmt.Sprintf("No healthy instances: CrashLoopBackOff - %s", msg)
-	}
-	if strings.Contains(msg, "Liveness probe failed") || strings.Contains(msg, "Readiness probe failed") {
-		return fmt.Sprintf("No healthy instances: Probe failed - %s", msg)
-	}
-
-	// Generic failure
-	return fmt.Sprintf("No healthy instances: %s", msg)
+// newReadyCondition creates a Ready condition and preserves the LastTransitionTime
+// from existingConditions when the status has not changed.
+func newReadyCondition(
+	status metav1.ConditionStatus,
+	reason string,
+	message string,
+	generation int64,
+	existingConditions []metav1.Condition,
+) metav1.Condition {
+	c := newCondition(ConditionTypeReady, status, reason, message, generation)
+	preserveLastTransitionTime(&c, existingConditions)
+	return c
 }
 
 // classifyAPIError classifies a Kubernetes API error as either a permanent ValidationError
