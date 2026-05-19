@@ -170,4 +170,3 @@ func isHTTPAuthError(err error) bool {
 	return strings.HasSuffix(msg, ": "+http.StatusText(http.StatusUnauthorized)) ||
 		strings.HasSuffix(msg, ": "+http.StatusText(http.StatusForbidden))
 }
-
