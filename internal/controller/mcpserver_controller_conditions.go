@@ -279,3 +279,8 @@ func acceptedConditionIsTrue(conditions []metav1.Condition) bool {
 	c := meta.FindStatusCondition(conditions, ConditionTypeAccepted)
 	return c != nil && c.Status == metav1.ConditionTrue
 }
+
+func readyConditionIsAvailable(conditions []metav1.Condition) bool {
+	c := meta.FindStatusCondition(conditions, ConditionTypeReady)
+	return c != nil && c.Status == metav1.ConditionTrue && c.Reason == ReasonAvailable
+}

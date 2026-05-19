@@ -416,11 +416,6 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	return ctrl.Result{}, nil
 }
 
-func readyConditionIsAvailable(conditions []metav1.Condition) bool {
-	c := meta.FindStatusCondition(conditions, ConditionTypeReady)
-	return c != nil && c.Status == metav1.ConditionTrue && c.Reason == ReasonAvailable
-}
-
 func (r *MCPServerReconciler) reconcilePermanentValidationError(
 	ctx context.Context,
 	mcpServer *mcpv1alpha1.MCPServer,
