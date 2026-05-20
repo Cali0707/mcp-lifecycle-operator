@@ -58,10 +58,6 @@ const (
 // MCPClientVersion is the version sent during MCP handshake. Bump with releases.
 var MCPClientVersion = "v0.1.0"
 
-func (e *ValidationError) Error() string {
-	return e.Message
-}
-
 // Condition types for MCPServer status.
 const (
 	// ConditionTypeAccepted indicates the MCPServer configuration is valid.

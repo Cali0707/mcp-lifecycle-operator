@@ -34,6 +34,10 @@ type ValidationError struct {
 	Message string
 }
 
+func (e *ValidationError) Error() string {
+	return e.Message
+}
+
 // validateConfig validates the MCPServer configuration.
 // Returns ValidationError for permanent configuration errors, wrapped error for transient errors, or nil for success.
 func (r *MCPServerReconciler) validateConfig(
