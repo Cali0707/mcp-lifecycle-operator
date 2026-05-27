@@ -116,6 +116,9 @@ func (r *MCPServerReconciler) verifyMCPEndpoint(ctx context.Context, url string)
 	if err != nil {
 		return nil, err
 	}
+	defer func() {
+		_ = session.Close()
+	}()
 
 	return extractServerInfo(session.InitializeResult()), nil
 }
