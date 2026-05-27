@@ -142,24 +142,57 @@ func deploymentNeedsUpdate(mcpServer *mcpv1alpha1.MCPServer, existing, desired *
 	}
 
 	return !equality.Semantic.DeepDerivative(newPodSpec, oldPodSpec) ||
-		// Explicit DeepEqual checks for fields that can be zeroed/removed by the user.
+		// Explicit checks for fields that can be zeroed/removed by the user.
 		// DeepDerivative skips zero-value fields in the desired spec, so removals
 		// (clearing args, env, volumes, etc.) would go undetected without these.
+		//
+		// DeepEqual is used for fields whose sub-fields are NOT defaulted by the
+		// API server (Args, Env, EnvFrom, VolumeMounts, Resources, SecurityContext).
+		// For fields that ARE defaulted (Volumes, Probes) we compare only the
+		// sub-fields we control — volume layout and probe handlers — so we don't
+		// false-positive on server-injected defaults like ConfigMap.DefaultMode or
+		// Probe.TimeoutSeconds.
 		!equality.Semantic.DeepEqual(oldPodSpec.Containers[0].Args, newPodSpec.Containers[0].Args) ||
 		!equality.Semantic.DeepEqual(oldPodSpec.Containers[0].Env, newPodSpec.Containers[0].Env) ||
 		!equality.Semantic.DeepEqual(oldPodSpec.Containers[0].EnvFrom, newPodSpec.Containers[0].EnvFrom) ||
 		!equality.Semantic.DeepEqual(oldPodSpec.SecurityContext, newPodSpec.SecurityContext) ||
-		!equality.Semantic.DeepEqual(oldPodSpec.Volumes, newPodSpec.Volumes) ||
+		volumeLayoutChanged(oldPodSpec.Volumes, newPodSpec.Volumes) ||
 		!equality.Semantic.DeepEqual(oldPodSpec.Containers[0].VolumeMounts, newPodSpec.Containers[0].VolumeMounts) ||
 		!equality.Semantic.DeepEqual(oldPodSpec.Containers[0].Resources, newPodSpec.Containers[0].Resources) ||
-		!equality.Semantic.DeepEqual(oldPodSpec.Containers[0].LivenessProbe, newPodSpec.Containers[0].LivenessProbe) ||
-		!equality.Semantic.DeepEqual(oldPodSpec.Containers[0].ReadinessProbe, newPodSpec.Containers[0].ReadinessProbe) ||
+		probeHandlerChanged(oldPodSpec.Containers[0].LivenessProbe, newPodSpec.Containers[0].LivenessProbe) ||
+		probeHandlerChanged(oldPodSpec.Containers[0].ReadinessProbe, newPodSpec.Containers[0].ReadinessProbe) ||
 		oldPodSpec.ServiceAccountName != newPodSpec.ServiceAccountName ||
 		!equality.Semantic.DeepEqual(existing.Spec.Replicas, desired.Spec.Replicas) ||
 		!equality.Semantic.DeepEqual(existing.Spec.Template.Annotations, desired.Spec.Template.Annotations) ||
 		deploymentAnnotationsChanged(mcpServer, existing) ||
 		deploymentLabelsChanged(mcpServer, existing) ||
 		ownershipChanged
+}
+
+func volumeLayoutChanged(a, b []corev1.Volume) bool {
+	if len(a) != len(b) {
+		return true
+	}
+
+	for i := range a {
+		if a[i].Name != b[i].Name {
+			return true
+		}
+	}
+
+	return false
+}
+
+func probeHandlerChanged(a, b *corev1.Probe) bool {
+	if (a == nil) != (b == nil) {
+		return true // both empty or set
+	}
+
+	if a == nil {
+		return false // first probe was not set, update since second was set
+	}
+
+	return !equality.Semantic.DeepEqual(a.ProbeHandler, b.ProbeHandler)
 }
 
 func managedWorkloadLabels(mcpServerName string) map[string]string {
