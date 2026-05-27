@@ -19,6 +19,8 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -1140,5 +1142,99 @@ var _ = Describe("MCPServer Controller - Health Probes", func() {
 		Expect(deployment.Spec.Template.Spec.Containers[0].ReadinessProbe.TCPSocket.Port.IntVal).To(Equal(int32(3000)))
 		Expect(deployment.Spec.Template.Spec.Containers[0].ReadinessProbe.InitialDelaySeconds).To(Equal(int32(15)))
 		Expect(deployment.Spec.Template.Spec.Containers[0].ReadinessProbe.PeriodSeconds).To(Equal(int32(20)))
+	})
+})
+
+var _ = Describe("MCPServer Controller - Deployment Reconcile Events", func() {
+	const resourceName = "test-deployment-events"
+
+	ctx := context.Background()
+
+	typeNamespacedName := types.NamespacedName{
+		Name:      resourceName,
+		Namespace: "default",
+	}
+
+	BeforeEach(func() {
+		resource := newTestMCPServer(resourceName)
+		Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+	})
+
+	AfterEach(func() {
+		resource := &mcpv1alpha1.MCPServer{}
+		err := k8sClient.Get(ctx, typeNamespacedName, resource)
+		if err == nil {
+			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
+		}
+	})
+
+	It("should emit a Warning DeploymentReconcileFailed event only when deployment error message changes", func() {
+		failMsg := "simulated deployment creation failure"
+		reconciler, fr := newReconcilerForTestWithFakeEvents(k8sClient, k8sClient.Scheme())
+
+		wrappedClient, err := client.NewWithWatch(cfg, client.Options{Scheme: k8sClient.Scheme()})
+		Expect(err).NotTo(HaveOccurred())
+
+		interceptedClient := interceptor.NewClient(wrappedClient, interceptor.Funcs{
+			Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+				if _, ok := obj.(*appsv1.Deployment); ok {
+					return fmt.Errorf("%s", failMsg)
+				}
+				return c.Create(ctx, obj, opts...)
+			},
+		})
+		reconciler.Client = interceptedClient
+
+		By("First deployment reconcile failure — Warning event emitted once")
+		_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+		Expect(err).To(HaveOccurred())
+
+		var deploymentFailedEvent string
+		Eventually(func(g Gomega) {
+			for _, ev := range drainEvents(fr.Events) {
+				if strings.Contains(ev, corev1.EventTypeWarning) && strings.Contains(ev, ReasonDeploymentUnavailable) {
+					deploymentFailedEvent = ev
+					break
+				}
+			}
+			g.Expect(deploymentFailedEvent).NotTo(BeEmpty())
+			g.Expect(deploymentFailedEvent).To(ContainSubstring(resourceName))
+			g.Expect(deploymentFailedEvent).To(ContainSubstring("Failed to reconcile Deployment"))
+			g.Expect(deploymentFailedEvent).To(ContainSubstring(failMsg))
+		}).Should(Succeed())
+
+		By("Second reconcile with same error — no duplicate deployment failed event")
+		_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+		Expect(err).To(HaveOccurred())
+		Consistently(fr.Events, 300*time.Millisecond, 20*time.Millisecond).ShouldNot(Receive())
+
+		By("Change error message — second Warning event emitted")
+		failMsg = "simulated deployment ownership failure"
+		interceptedClient = interceptor.NewClient(wrappedClient, interceptor.Funcs{
+			Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+				if _, ok := obj.(*appsv1.Deployment); ok {
+					return fmt.Errorf("%s", failMsg)
+				}
+				return c.Create(ctx, obj, opts...)
+			},
+		})
+		reconciler.Client = interceptedClient
+
+		_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+		Expect(err).To(HaveOccurred())
+
+		var secondDeploymentFailedEvent string
+		Eventually(func(g Gomega) {
+			for _, ev := range drainEvents(fr.Events) {
+				if strings.Contains(ev, corev1.EventTypeWarning) && strings.Contains(ev, ReasonDeploymentUnavailable) {
+					secondDeploymentFailedEvent = ev
+					break
+				}
+			}
+			g.Expect(secondDeploymentFailedEvent).NotTo(BeEmpty())
+			g.Expect(secondDeploymentFailedEvent).To(ContainSubstring(resourceName))
+			g.Expect(secondDeploymentFailedEvent).To(ContainSubstring(failMsg))
+			g.Expect(secondDeploymentFailedEvent).NotTo(Equal(deploymentFailedEvent))
+		}).Should(Succeed())
 	})
 })

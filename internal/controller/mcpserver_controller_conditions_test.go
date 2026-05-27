@@ -687,4 +687,18 @@ var _ = Describe("status condition helpers", func() {
 			{Type: ConditionTypeReady, Status: metav1.ConditionFalse, Reason: ReasonMCPEndpointUnavailable, Message: msg},
 		}, msg)).To(BeTrue())
 	})
+
+	It("duplicateDeploymentUnavailable returns true only for matching Ready=False DeploymentUnavailable message", func() {
+		msg := "Failed to reconcile Deployment: simulated failure"
+		Expect(duplicateDeploymentUnavailable(nil, msg)).To(BeFalse())
+		Expect(duplicateDeploymentUnavailable([]metav1.Condition{
+			{Type: ConditionTypeReady, Status: metav1.ConditionFalse, Reason: ReasonMCPEndpointUnavailable, Message: msg},
+		}, msg)).To(BeFalse())
+		Expect(duplicateDeploymentUnavailable([]metav1.Condition{
+			{Type: ConditionTypeReady, Status: metav1.ConditionFalse, Reason: ReasonDeploymentUnavailable, Message: "other"},
+		}, msg)).To(BeFalse())
+		Expect(duplicateDeploymentUnavailable([]metav1.Condition{
+			{Type: ConditionTypeReady, Status: metav1.ConditionFalse, Reason: ReasonDeploymentUnavailable, Message: msg},
+		}, msg)).To(BeTrue())
+	})
 })

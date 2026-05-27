@@ -290,3 +290,9 @@ func duplicateHandshakeUnavailable(conditions []metav1.Condition, message string
 	return prevReady != nil && prevReady.Status == metav1.ConditionFalse &&
 		prevReady.Reason == ReasonMCPEndpointUnavailable && prevReady.Message == message
 }
+
+func duplicateDeploymentUnavailable(conditions []metav1.Condition, message string) bool {
+	prevReady := meta.FindStatusCondition(conditions, ConditionTypeReady)
+	return prevReady != nil && prevReady.Status == metav1.ConditionFalse &&
+		prevReady.Reason == ReasonDeploymentUnavailable && prevReady.Message == message
+}

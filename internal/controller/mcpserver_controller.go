@@ -113,6 +113,8 @@ const (
 	eventActionMCPHandshakeFailed = "MCPHandshakeFailed"
 	// eventActionMCPHandshakeRetriesExhausted is the reporting action when handshake retries are exhausted.
 	eventActionMCPHandshakeRetriesExhausted = "MCPHandshakeRetriesExhausted"
+	// eventActionDeploymentReconcileFailed is the reporting action when Deployment reconciliation fails.
+	eventActionDeploymentReconcileFailed = "DeploymentReconcileFailed"
 
 	// requeueDelayMCPHandshake is the initial delay before requeuing when an MCP handshake fails.
 	requeueDelayMCPHandshake = 10 * time.Second
@@ -248,6 +250,10 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 		recordCondition(mcpServer.Name, mcpServer.Namespace,
 			readyCondition.Type, string(readyCondition.Status), readyCondition.Reason)
+
+		if !duplicateDeploymentUnavailable(mcpServer.Status.Conditions, readyCondition.Message) {
+			r.emitDeploymentReconcileFailed(mcpServer, readyCondition.Message)
+		}
 
 		status := acv1alpha1.MCPServerStatus().
 			WithObservedGeneration(mcpServer.Generation).
@@ -501,6 +507,14 @@ func (r *MCPServerReconciler) emitServerReady(mcpServer *mcpv1alpha1.MCPServer) 
 		return
 	}
 	r.Recorder.Eventf(mcpServer, nil, corev1.EventTypeNormal, ReasonAvailable, eventActionServerReady, "MCPServer %s is ready; Ready=True", mcpServer.Name)
+}
+
+func (r *MCPServerReconciler) emitDeploymentReconcileFailed(mcpServer *mcpv1alpha1.MCPServer, message string) {
+	if r.Recorder == nil {
+		return
+	}
+	r.Recorder.Eventf(mcpServer, nil, corev1.EventTypeWarning, ReasonDeploymentUnavailable, eventActionDeploymentReconcileFailed,
+		"MCPServer %s: %s", mcpServer.Name, message)
 }
 
 func (r *MCPServerReconciler) emitMCPHandshakeFailed(mcpServer *mcpv1alpha1.MCPServer, message string) {
