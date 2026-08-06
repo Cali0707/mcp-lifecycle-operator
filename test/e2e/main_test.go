@@ -57,6 +57,8 @@ func TestMain(m *testing.M) {
 
 	// Create a unique namespace before each test, delete it after.
 	testenv.BeforeEachTest(func(ctx context.Context, cfg *envconf.Config, t *testing.T) (context.Context, error) {
+		f.MustDiscoverOperatorOnce(ctx, cfg, t)
+
 		ns := envconf.RandomName("e2e", 16)
 		nsObj := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}
 		if err := cfg.Client().Resources().Create(ctx, nsObj); err != nil {
@@ -140,10 +142,9 @@ func dumpDiagnostics(ctx context.Context, t *testing.T, cfg *envconf.Config, ns 
 		}
 	}
 
-	// Also dump controller-manager pod logs from the operator namespace,
-	// since the controller is relevant to all test failures.
 	t.Log("--- controller-manager logs ---")
-	controllerNs := "mcp-lifecycle-operator-system"
+	opRef := f.MustDiscoverOperatorOnce(ctx, cfg, t)
+	controllerNs := opRef.Namespace
 	rCtrl := cfg.Client().Resources(controllerNs)
 	var ctrlPods corev1.PodList
 	if err := rCtrl.List(ctx, &ctrlPods); err == nil {
