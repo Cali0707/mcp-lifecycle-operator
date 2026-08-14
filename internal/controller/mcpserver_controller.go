@@ -87,6 +87,11 @@ const (
 	ReasonMCPEndpointUnavailable   = "MCPEndpointUnavailable"
 )
 
+// Event-only reasons (not used as condition reasons).
+const (
+	EventReasonCapabilityChanged = "CapabilityChanged"
+)
+
 // Container waiting reasons from Kubernetes pod status.
 const (
 	WaitingReasonImagePullBackOff           = "ImagePullBackOff"
@@ -367,7 +372,7 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			conditionToAC(readyCondition),
 		)
 
-	r.detectCapabilityChanges(mcpServer, serverInfo)
+	capDiff := capabilityChangeMessage(mcpServer, serverInfo)
 
 	if serverInfo != nil {
 		si := acv1alpha1.MCPServerInfo()
@@ -397,6 +402,11 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	if err := r.applyStatus(ctx, mcpServer, status); err != nil {
 		logger.Error(err, "Failed to apply MCPServer status")
 		return ctrl.Result{}, err
+	}
+
+	if capDiff != "" {
+		capabilityChangesTotal.WithLabelValues(mcpServer.Name, mcpServer.Namespace).Inc()
+		r.emitCapabilityChangeDetected(mcpServer, capDiff)
 	}
 
 	logger.Info("Successfully reconciled MCPServer",
@@ -618,24 +628,21 @@ func (r *MCPServerReconciler) emitMCPHandshakeRetriesExhausted(mcpServer *mcpv1a
 		mcpServer.Name, retryCount)
 }
 
-func (r *MCPServerReconciler) detectCapabilityChanges(mcpServer *mcpv1alpha1.MCPServer, serverInfo *mcpv1alpha1.MCPServerInfo) {
-	if serverInfo == nil || mcpServer.Status.ServerInfo == nil ||
-		serverInfo.Capabilities == nil || mcpServer.Status.ServerInfo.Capabilities == nil {
-		return
+func capabilityChangeMessage(mcpServer *mcpv1alpha1.MCPServer, serverInfo *mcpv1alpha1.MCPServerInfo) string {
+	if serverInfo == nil || mcpServer.Status.ServerInfo == nil {
+		return ""
 	}
-	diff := capabilityDiffMessage(mcpServer.Status.ServerInfo.Capabilities, serverInfo.Capabilities)
-	if diff == "" {
-		return
+	if serverInfo.Capabilities == nil && mcpServer.Status.ServerInfo.Capabilities == nil {
+		return ""
 	}
-	capabilityChangesTotal.WithLabelValues(mcpServer.Name, mcpServer.Namespace).Inc()
-	r.emitCapabilityChangeDetected(mcpServer, diff)
+	return capabilityDiffMessage(mcpServer.Status.ServerInfo.Capabilities, serverInfo.Capabilities)
 }
 
 func (r *MCPServerReconciler) emitCapabilityChangeDetected(mcpServer *mcpv1alpha1.MCPServer, diff string) {
 	if r.Recorder == nil {
 		return
 	}
-	r.Recorder.Eventf(mcpServer, nil, corev1.EventTypeWarning, "CapabilityChanged", eventActionCapabilityChangeDetected,
+	r.Recorder.Eventf(mcpServer, nil, corev1.EventTypeWarning, EventReasonCapabilityChanged, eventActionCapabilityChangeDetected,
 		"MCP server capabilities changed: %s", diff)
 }
 
