@@ -342,14 +342,14 @@ func healthyContainerStatus() corev1.ContainerStatus {
 	}
 }
 
-func imagePullContainerStatus(msg string) corev1.ContainerStatus {
+func imagePullContainerStatus() corev1.ContainerStatus {
 	return corev1.ContainerStatus{
 		Name:  "c",
 		Image: "ghcr.io/bad/image:v1",
 		State: corev1.ContainerState{
 			Waiting: &corev1.ContainerStateWaiting{
 				Reason:  WaitingReasonImagePullBackOff,
-				Message: msg,
+				Message: "manifest unknown",
 			},
 		},
 	}
@@ -407,7 +407,7 @@ var _ = Describe("podFailureSignature", func() {
 	})
 
 	It("should change when the failure kind changes", func() {
-		imgPull := podWithContainerStatus("p", imagePullContainerStatus("manifest unknown"))
+		imgPull := podWithContainerStatus("p", imagePullContainerStatus())
 		crash := podWithContainerStatus("p", crashLoopContainerStatus(1, 1))
 		Expect(podFailureSignature(imgPull)).NotTo(Equal(podFailureSignature(crash)))
 	})
@@ -415,7 +415,7 @@ var _ = Describe("podFailureSignature", func() {
 	It("should prefer init container failures", func() {
 		pod := podWithContainerStatus("p", crashLoopContainerStatus(1, 1))
 		pod.Status.InitContainerStatuses = []corev1.ContainerStatus{
-			imagePullContainerStatus("manifest unknown"),
+			imagePullContainerStatus(),
 		}
 		Expect(podFailureSignature(pod)).To(ContainSubstring(string(failureImagePull)))
 	})
@@ -431,7 +431,7 @@ var _ = Describe("podDiagnosticsChangedPredicate", func() {
 				Waiting: &corev1.ContainerStateWaiting{Reason: "ContainerCreating"},
 			},
 		})
-		after := podWithContainerStatus("p", imagePullContainerStatus("manifest unknown"))
+		after := podWithContainerStatus("p", imagePullContainerStatus())
 		Expect(pred.Update(event.UpdateEvent{ObjectOld: before, ObjectNew: after})).To(BeTrue())
 	})
 
@@ -448,20 +448,20 @@ var _ = Describe("podDiagnosticsChangedPredicate", func() {
 	})
 
 	It("should fire when a failure clears", func() {
-		before := podWithContainerStatus("p", imagePullContainerStatus("manifest unknown"))
+		before := podWithContainerStatus("p", imagePullContainerStatus())
 		after := podWithContainerStatus("p", healthyContainerStatus())
 		Expect(pred.Update(event.UpdateEvent{ObjectOld: before, ObjectNew: after})).To(BeTrue())
 	})
 
 	It("should fire on create only for pods that are already failing", func() {
-		failing := podWithContainerStatus("p", imagePullContainerStatus("manifest unknown"))
+		failing := podWithContainerStatus("p", imagePullContainerStatus())
 		healthy := podWithContainerStatus("p", healthyContainerStatus())
 		Expect(pred.Create(event.CreateEvent{Object: failing})).To(BeTrue())
 		Expect(pred.Create(event.CreateEvent{Object: healthy})).To(BeFalse())
 	})
 
 	It("should fire on delete of a failing pod, or whenever the final state was missed", func() {
-		failing := podWithContainerStatus("p", imagePullContainerStatus("manifest unknown"))
+		failing := podWithContainerStatus("p", imagePullContainerStatus())
 		healthy := podWithContainerStatus("p", healthyContainerStatus())
 		Expect(pred.Delete(event.DeleteEvent{Object: failing})).To(BeTrue())
 		Expect(pred.Delete(event.DeleteEvent{Object: healthy})).To(BeFalse())
