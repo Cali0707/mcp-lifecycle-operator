@@ -216,7 +216,7 @@ func classifyContainer(cs corev1.ContainerStatus, podName string, init bool) (co
 		case WaitingReasonCrashLoopBackOff:
 			f.Kind = failureCrashLoop
 			if t := cs.LastTerminationState.Terminated; t != nil {
-				f.ExitCode = ptr.To(t.ExitCode)
+				f.ExitCode = new(t.ExitCode)
 			}
 			// Waiting.Message is dropped here: it embeds a changing back-off
 			// duration, which would churn the fingerprint below.
@@ -228,7 +228,7 @@ func classifyContainer(cs corev1.ContainerStatus, podName string, init bool) (co
 	}
 
 	if t := cs.State.Terminated; t != nil && t.Reason == TerminatedReasonOOMKilled {
-		f.Kind, f.ExitCode = failureOOMKilled, ptr.To(t.ExitCode)
+		f.Kind, f.ExitCode = failureOOMKilled, new(t.ExitCode)
 		return f, true
 	}
 
