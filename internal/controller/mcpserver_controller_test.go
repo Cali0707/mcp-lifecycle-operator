@@ -828,7 +828,7 @@ var _ = Describe("MCPServer Controller", func() {
 			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
 		})
 
-		It("should requeue reconciliation when Deployment is unavailable", func() {
+		It("should not use a timed requeue when Deployment is unavailable", func() {
 			controllerReconciler := newReconcilerForTest(k8sClient, k8sClient.Scheme())
 
 			By("Initial reconciliation creates deployment")
@@ -856,13 +856,13 @@ var _ = Describe("MCPServer Controller", func() {
 			}
 			Expect(k8sClient.Status().Update(ctx, deployment)).To(Succeed())
 
-			By("Reconciling should set Ready=False and requeue")
+			By("Reconciling should set Ready=False without a timed requeue")
 			result, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: typeNamespacedName,
 			})
 			Expect(err).NotTo(HaveOccurred())
 
-			Expect(result.RequeueAfter).To(Equal(15 * time.Second))
+			Expect(result.RequeueAfter).To(BeZero())
 
 			mcpServer := &mcpv1alpha1.MCPServer{}
 			Expect(k8sClient.Get(ctx, typeNamespacedName, mcpServer)).To(Succeed())
@@ -952,12 +952,12 @@ var _ = Describe("MCPServer Controller", func() {
 			}
 			Expect(k8sClient.Status().Update(ctx, deployment)).To(Succeed())
 
-			By("First reconciliation: unavailable, requeue")
+			By("First reconciliation: unavailable, no timed requeue")
 			result, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: typeNamespacedName,
 			})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).To(Equal(15 * time.Second))
+			Expect(result.RequeueAfter).To(BeZero())
 
 			mcpServer := &mcpv1alpha1.MCPServer{}
 			Expect(k8sClient.Get(ctx, typeNamespacedName, mcpServer)).To(Succeed())
