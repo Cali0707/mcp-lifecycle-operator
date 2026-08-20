@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -176,6 +177,10 @@ type MCPServerReconciler struct {
 	// TLSProfile applies operator-wide TLS settings (min version, cipher suites)
 	// to outbound connections. Populated from TLS_MIN_VERSION / TLS_CIPHER_SUITES.
 	TLSProfile func(*tls.Config)
+	// tlsCABundleHashes tracks the SHA-256 hash of each MCPServer's CA bundle
+	// Secret content at the time of the last successful handshake. Keyed by
+	// namespace/name. Used to detect CA rotation without bumping generation.
+	tlsCABundleHashes sync.Map
 }
 
 // +kubebuilder:rbac:groups=mcp.x-k8s.io,resources=mcpservers,verbs=get;list;watch;update;patch
@@ -204,6 +209,7 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	if err := r.Get(ctx, req.NamespacedName, mcpServer); err != nil {
 		if apierrors.IsNotFound(err) {
 			logger.Info("MCPServer resource not found, ignoring since object must be deleted")
+			r.tlsCABundleHashes.Delete(req.Namespace + "/" + req.Name)
 			cleanupMetrics(req.Name, req.Namespace)
 			return ctrl.Result{}, nil
 		}
@@ -359,9 +365,16 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	mcpURL := fmt.Sprintf("%s://%s.%s.svc.cluster.local:%d%s",
 		urlScheme(mcpServer), mcpServer.Name, mcpServer.Namespace, mcpServer.Spec.Config.Port, path)
 
+	// Compute current TLS CA bundle hash so the handshake is re-verified
+	// when the CA bundle Secret content changes (which does not bump generation).
+	var tlsCABundleHash string
+	if mcpServer.Spec.Transport != nil && mcpServer.Spec.Transport.TLS != nil {
+		tlsCABundleHash = computeTLSCABundleHash(ctx, r.APIReader, mcpServer.Namespace, mcpServer.Spec.Transport.TLS)
+	}
+
 	// If deployment-level readiness reports Available, verify the MCP endpoint.
 	var serverInfo *mcpv1alpha1.MCPServerInfo
-	readyCondition, serverInfo = r.reconcileHandshake(ctx, mcpServer, mcpURL, readyCondition)
+	readyCondition, serverInfo = r.reconcileHandshake(ctx, mcpServer, mcpURL, readyCondition, tlsCABundleHash)
 
 	// Normal Event once per Ready transition to Available after a successful handshake.
 	if pendingServerReadyEvent &&
@@ -396,6 +409,8 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		logger.Error(err, "Failed to apply MCPServer status")
 		return ctrl.Result{}, err
 	}
+
+	r.updateTLSCABundleHash(mcpServer, tlsCABundleHash, readyCondition)
 
 	if capDiff != "" {
 		capabilityChangesTotal.WithLabelValues(mcpServer.Name, mcpServer.Namespace).Inc()
