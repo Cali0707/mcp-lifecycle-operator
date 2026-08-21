@@ -25,6 +25,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -179,6 +180,17 @@ func (r *MCPServerReconciler) findMCPServersForConfigMap(ctx context.Context, co
 // using the field index for efficient lookup.
 func (r *MCPServerReconciler) findMCPServersForSecret(ctx context.Context, secret client.Object) []reconcile.Request {
 	return r.findMCPServersForResource(ctx, secret.GetName(), secret.GetNamespace(), secretIndexKey)
+}
+
+func (r *MCPServerReconciler) findMCPServersForPod(ctx context.Context, pod client.Object) []reconcile.Request {
+	name, ok := pod.GetLabels()[LabelKeyMCPServer]
+	if !ok || name == "" {
+		return nil
+	}
+
+	return []reconcile.Request{{
+		NamespacedName: types.NamespacedName{Name: name, Namespace: pod.GetNamespace()},
+	}}
 }
 
 // extractConfigMapNames is an index extractor that returns all ConfigMap names
