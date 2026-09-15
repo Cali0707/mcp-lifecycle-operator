@@ -63,6 +63,25 @@ rules:
   - update
   - watch
 - apiGroups:
+  - mcp.kuadrant.io
+  resources:
+  - mcpgatewayextensions
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - mcp.kuadrant.io
+  resources:
+  - mcpserverregistrations
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - update
+  - watch
+- apiGroups:
   - mcp.x-k8s.io
   resources:
   - mcpgatewaybindings

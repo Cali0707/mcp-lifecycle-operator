@@ -54,9 +54,9 @@ import (
 const (
 	fieldManager = "mcpserver-controller"
 
-	// defaultMCPPath is the default HTTP path for MCP endpoints, matching the
+	// DefaultMCPPath is the default HTTP path for MCP endpoints, matching the
 	// kubebuilder default on ServerConfig.Path.
-	defaultMCPPath = "/mcp"
+	DefaultMCPPath = "/mcp"
 
 	// mcpClientName is the client name sent during MCP handshake.
 	mcpClientName = "mcp-lifecycle-operator"
@@ -413,7 +413,7 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// Build status
 	path := mcpServer.Spec.Config.Path
 	if path == "" {
-		path = defaultMCPPath
+		path = DefaultMCPPath
 	}
 
 	mcpURL := fmt.Sprintf("%s://%s.%s.svc.cluster.local:%d%s",
@@ -439,8 +439,10 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// Must run before the ready-event check so availableCondition reflects
 	// any GatewayNotRegistered override.
 	gwStatus := r.reconcileGatewayCondition(ctx, mcpServer)
+	var gwErr error
 	if gwStatus != nil {
 		availableCondition, mcpURL = r.applyGatewayStatus(mcpServer, gwStatus, availableCondition, mcpURL)
+		gwErr = gwStatus.err
 	}
 
 	// Normal Event once per transition to fully ready (Available + Verified).
@@ -488,23 +490,13 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// Deployment progress is driven by the Deployment and Pod watches rather than a
 	// timed requeue; pod-level failures surface via podDiagnosticsChangedPredicate.
 
-	// If MCP endpoint is not yet reachable, requeue with exponential backoff up to a max retry count.
-	if verifiedCondition.Status == metav1.ConditionFalse && verifiedCondition.Reason == ReasonEndpointUnavailable {
-		retryCount := int(handshakeRetryCount)
-		if retryCount >= maxMCPHandshakeRetries {
-			logger.Info("MCP handshake retries exhausted, not requeuing",
-				"retries", retryCount, "max", maxMCPHandshakeRetries)
-			auditHandshakeRetriesExhausted(ctx, mcpServer, retryCount, maxMCPHandshakeRetries)
-			return ctrl.Result{}, nil
-		}
-		// retryCount is 1-based (already incremented); backoff expects 0-based
-		delay := mcpHandshakeBackoff(retryCount - 1)
-		logger.Info("MCP endpoint not yet reachable, requeuing with backoff",
-			"requeueAfter", delay, "retry", retryCount, "maxRetries", maxMCPHandshakeRetries)
-		return ctrl.Result{RequeueAfter: delay}, nil
+	// If MCP endpoint is not yet reachable, requeue with exponential backoff.
+	// retryCount is 1-based (already incremented); handshakeRequeue adjusts internally.
+	if result, done := handshakeRequeue(ctx, mcpServer, verifiedCondition, int(handshakeRetryCount)); done {
+		return result, nil
 	}
 
-	return ctrl.Result{}, nil
+	return ctrl.Result{}, gwErr
 }
 
 func serverInfoToAC(info *mcpv1beta1.MCPServerInfo) *acv1beta1.MCPServerInfoApplyConfiguration {

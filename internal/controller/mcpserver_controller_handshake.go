@@ -28,6 +28,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	mcpv1beta1 "github.com/kubernetes-sigs/mcp-lifecycle-operator/api/v1beta1"
@@ -252,6 +253,28 @@ func mcpHandshakeBackoff(retryCount int) time.Duration {
 		}
 	}
 	return delay
+}
+
+// handshakeRequeue checks whether the MCP endpoint needs a backoff requeue and
+// returns the appropriate result. If the endpoint is unavailable, it either
+// stops requeuing (retries exhausted) or computes an exponential backoff delay.
+// Returns (result, true) when the caller should return early, or (_, false) to continue.
+func handshakeRequeue(ctx context.Context, mcpServer *mcpv1beta1.MCPServer,
+	verifiedCondition metav1.Condition, retryCount int) (ctrl.Result, bool) {
+	if verifiedCondition.Status != metav1.ConditionFalse || verifiedCondition.Reason != ReasonEndpointUnavailable {
+		return ctrl.Result{}, false
+	}
+	logger := log.FromContext(ctx)
+	if retryCount >= maxMCPHandshakeRetries {
+		logger.Info("MCP handshake retries exhausted, not requeuing",
+			"retries", retryCount, "max", maxMCPHandshakeRetries)
+		auditHandshakeRetriesExhausted(ctx, mcpServer, retryCount, maxMCPHandshakeRetries)
+		return ctrl.Result{}, true
+	}
+	delay := mcpHandshakeBackoff(retryCount - 1)
+	logger.Info("MCP endpoint not yet reachable, requeuing with backoff",
+		"requeueAfter", delay, "retry", retryCount, "maxRetries", maxMCPHandshakeRetries)
+	return ctrl.Result{RequeueAfter: delay}, true
 }
 
 // capabilityDiffMessage compares two MCPServerCapabilities and returns a

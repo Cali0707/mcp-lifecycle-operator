@@ -61,8 +61,6 @@ const (
 	// integration controller.
 	ProviderName = "httproute"
 
-	defaultMCPPath = "/mcp"
-
 	configKeyGatewayName      = "gateway-name"
 	configKeyGatewayNamespace = "gateway-namespace"
 	configKeyHostname         = "hostname"
@@ -95,6 +93,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
+	}
+
+	if binding.Spec.Provider != ProviderName {
+		return ctrl.Result{}, nil
 	}
 
 	logger.Info("Reconciling MCPGatewayBinding", "name", binding.Name, "namespace", binding.Namespace)
@@ -133,7 +135,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 	path := mcpServer.Spec.Config.Path
 	if path == "" {
-		path = defaultMCPPath
+		path = mcpcontroller.DefaultMCPPath
 	}
 	pathType := gatewayv1.PathMatchPathPrefix
 
@@ -197,8 +199,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	if apierrors.IsNotFound(err) {
 		logger.Info("Creating HTTPRoute", "name", httpRoute.Name)
 		if createErr := r.Create(ctx, httpRoute); createErr != nil {
-			_ = r.setNotRegistered(ctx, binding,
-				fmt.Sprintf("Failed to create HTTPRoute: %v", createErr))
 			return ctrl.Result{}, createErr
 		}
 	} else if err != nil {
@@ -213,8 +213,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			logger.Info("Updating HTTPRoute", "name", httpRoute.Name)
 			existing.Spec = httpRoute.Spec
 			if updateErr := r.Update(ctx, existing); updateErr != nil {
-				_ = r.setNotRegistered(ctx, binding,
-					fmt.Sprintf("Failed to update HTTPRoute: %v", updateErr))
 				return ctrl.Result{}, updateErr
 			}
 		}
@@ -225,7 +223,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, err
 	}
 
-	if !isHTTPRouteAccepted(route) {
+	if !isHTTPRouteAccepted(route, gwName, gwNamespace) {
 		statusErr := r.updateBindingStatus(ctx, binding, metav1.ConditionFalse,
 			reasonRouteNotAccepted, "Waiting for gateway to accept HTTPRoute", "")
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, statusErr
@@ -249,18 +247,24 @@ func (r *Reconciler) setNotRegistered(
 	binding *mcpv1alpha1.MCPGatewayBinding,
 	message string,
 ) error {
-	r.deleteStaleHTTPRoute(ctx, binding)
+	if err := r.deleteStaleHTTPRoute(ctx, binding); err != nil {
+		return err
+	}
 	return r.updateBindingStatus(ctx, binding, metav1.ConditionFalse, mcpcontroller.ReasonGatewayNotRegistered, message, "")
 }
 
-func (r *Reconciler) deleteStaleHTTPRoute(ctx context.Context, binding *mcpv1alpha1.MCPGatewayBinding) {
+func (r *Reconciler) deleteStaleHTTPRoute(ctx context.Context, binding *mcpv1alpha1.MCPGatewayBinding) error {
 	route := &gatewayv1.HTTPRoute{}
 	if err := r.Get(ctx, client.ObjectKey{Name: binding.Name, Namespace: binding.Namespace}, route); err != nil {
-		return
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("checking for stale HTTPRoute: %w", err)
 	}
-	if err := r.Delete(ctx, route); err != nil {
-		log.FromContext(ctx).Error(err, "Failed to delete stale HTTPRoute", "name", binding.Name)
+	if err := r.Delete(ctx, route); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("deleting stale HTTPRoute: %w", err)
 	}
+	return nil
 }
 
 func (r *Reconciler) updateBindingStatus(
@@ -282,12 +286,7 @@ func (r *Reconciler) updateBindingStatus(
 		Reason:             reason,
 		Message:            message,
 		ObservedGeneration: binding.Generation,
-		LastTransitionTime: metav1.Now(),
 	}
-	if existing := meta.FindStatusCondition(binding.Status.Conditions, condition.Type); existing != nil && existing.Status == condition.Status {
-		condition.LastTransitionTime = existing.LastTransitionTime
-	}
-
 	meta.SetStatusCondition(&binding.Status.Conditions, condition)
 	binding.Status.URL = url
 
@@ -337,11 +336,25 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-func isHTTPRouteAccepted(route *gatewayv1.HTTPRoute) bool {
+func isHTTPRouteAccepted(route *gatewayv1.HTTPRoute, gwName, gwNamespace string) bool {
 	for _, parent := range route.Status.Parents {
+		if string(parent.ParentRef.Name) != gwName {
+			continue
+		}
+		ns := route.Namespace
+		if parent.ParentRef.Namespace != nil {
+			ns = string(*parent.ParentRef.Namespace)
+		}
+		if ns != gwNamespace {
+			continue
+		}
+
 		accepted := false
 		resolvedRefs := false
 		for _, cond := range parent.Conditions {
+			if cond.ObservedGeneration < route.Generation {
+				continue
+			}
 			if cond.Type == string(gatewayv1.RouteConditionAccepted) &&
 				cond.Status == metav1.ConditionTrue {
 				accepted = true
