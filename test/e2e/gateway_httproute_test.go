@@ -93,7 +93,7 @@ func TestHTTPRouteProviderResources(t *testing.T) {
 				t.Fatalf("expected backendRef name %s, got %s", server.Name, route.Spec.Rules[0].BackendRefs[0].Name)
 			}
 
-			hostname := prov.ConfigData["hostname"]
+			hostname := prov.ConfigData["route-hostname"]
 			if len(route.Spec.Hostnames) != 1 || string(route.Spec.Hostnames[0]) != hostname {
 				t.Fatalf("expected hostname %s, got %v", hostname, route.Spec.Hostnames)
 			}

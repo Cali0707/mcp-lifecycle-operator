@@ -137,14 +137,15 @@ metadata:
 data:
   gateway-name: my-gateway
   gateway-namespace: gateway-system
-  hostname: mcp.example.com
+  route-hostname: mcp.example.com
 ```
 
 | Key                 | Required | Description                                       |
 |---------------------|----------|---------------------------------------------------|
 | `gateway-name`      | Yes      | Name of the existing Gateway resource              |
 | `gateway-namespace` | Yes      | Namespace where the Gateway resource lives          |
-| `hostname`          | No       | Hostname to set on the HTTPRoute for routing        |
+| `route-hostname`    | No       | Hostname to set on the HTTPRoute for routing        |
+| `public-hostname`   | No       | Public hostname for the status URL. When omitted, falls back to `route-hostname`, then to the Gateway's status addresses |
 
 !!! warning "Cross-namespace routing"
     When the Gateway lives in a different namespace than the MCPServer (as in this example), the Gateway must explicitly allow cross-namespace routes. By default, Gateway API sets `allowedRoutes.namespaces.from: Same`, which rejects routes from other namespaces. Configure the Gateway listener to accept routes from the MCPServer's namespace:
@@ -217,7 +218,8 @@ data:
 |---------------------|----------|---------|--------------------------------------------------------------|
 | `gateway-name`      | Yes      |         | Name of the existing Gateway resource                        |
 | `gateway-namespace` | Yes      |         | Namespace where the Gateway resource lives                   |
-| `hostname`          | No       | auto    | Hostname for the HTTPRoute. When omitted, auto-constructed from the Gateway listener's wildcard hostname (e.g., `*.mcp.local` + MCPServer name = `my-server.mcp.local`). Set explicitly to override. |
+| `route-hostname`    | No       | auto    | Hostname for the HTTPRoute. When omitted, auto-constructed from the Gateway listener's wildcard hostname (e.g., `*.mcp.local` + MCPServer name = `my-server.mcp.local`). Set explicitly to override. |
+| `public-hostname`   | No       | auto    | Public hostname for the status URL. When omitted, resolved via: MCPGatewayExtension `publicHost` → public listener hostname. Set explicitly to override all auto-resolution. |
 | `prefix`            | Yes      |         | Tool/prompt name prefix for federation (e.g., `myserver_`)   |
 | `section-name`      | No       | `mcps`  | Gateway listener section name for the parent reference       |
 
@@ -227,7 +229,7 @@ For each registered binding, the controller creates:
 
 1. An **HTTPRoute** that:
     - References the specified Gateway with the configured `sectionName` (default `mcps`)
-    - Sets the hostname from the ConfigMap
+    - Sets the hostname from `route-hostname` (or auto-constructed from the listener wildcard)
     - Matches the MCPServer's path (default `/mcp`) using `PathPrefix`
     - Routes traffic to the MCPServer's Service and port
 

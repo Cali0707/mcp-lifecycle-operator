@@ -66,7 +66,8 @@ const (
 
 	configKeyGatewayName      = "gateway-name"
 	configKeyGatewayNamespace = "gateway-namespace"
-	configKeyHostname         = "hostname"
+	configKeyRouteHostname    = "route-hostname"
+	configKeyPublicHostname   = "public-hostname"
 	configKeyPrefix           = "prefix"
 	configKeySectionName      = "section-name"
 
@@ -96,9 +97,14 @@ type Reconciler struct {
 
 type parsedConfig struct {
 	gwName, gwNamespace, sectionName string
-	hostname                         string
-	hostnameExplicit                 bool
+	routeHostname                    string
+	publicHostname                   string
 	prefix, path                     string
+}
+
+type publicEndpoint struct {
+	host   string
+	scheme string
 }
 
 func (r *Reconciler) parseConfig(ctx context.Context, binding *mcpv1alpha1.MCPGatewayBinding, mcpServer *mcpv1beta1.MCPServer) (*parsedConfig, error) {
@@ -130,16 +136,6 @@ func (r *Reconciler) parseConfig(ctx context.Context, binding *mcpv1alpha1.MCPGa
 		sectionName = sn
 	}
 
-	hostname, hostnameExplicit := configMap.Data[configKeyHostname]
-	if !hostnameExplicit || hostname == "" {
-		hostnameExplicit = false
-		var resolveErr error
-		hostname, resolveErr = r.resolveHostname(ctx, mcpServer.Name, gwName, gwNamespace, sectionName)
-		if resolveErr != nil {
-			return nil, r.setNotRegistered(ctx, binding, resolveErr.Error())
-		}
-	}
-
 	prefix, ok := configMap.Data[configKeyPrefix]
 	if !ok || prefix == "" {
 		return nil, r.setNotRegistered(ctx, binding,
@@ -152,13 +148,13 @@ func (r *Reconciler) parseConfig(ctx context.Context, binding *mcpv1alpha1.MCPGa
 	}
 
 	return &parsedConfig{
-		gwName:           gwName,
-		gwNamespace:      gwNamespace,
-		sectionName:      sectionName,
-		hostname:         hostname,
-		hostnameExplicit: hostnameExplicit,
-		prefix:           prefix,
-		path:             path,
+		gwName:         gwName,
+		gwNamespace:    gwNamespace,
+		sectionName:    sectionName,
+		routeHostname:  configMap.Data[configKeyRouteHostname],
+		publicHostname: configMap.Data[configKeyPublicHostname],
+		prefix:         prefix,
+		path:           path,
 	}, nil
 }
 
@@ -192,7 +188,16 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, err
 	}
 
-	if err := r.reconcileHTTPRoute(ctx, binding, mcpServer, cfg.gwName, cfg.gwNamespace, cfg.hostname, cfg.sectionName, cfg.path); err != nil {
+	routeHostname := cfg.routeHostname
+	if routeHostname == "" {
+		var resolveErr error
+		routeHostname, resolveErr = r.resolveHostname(ctx, mcpServer.Name, cfg.gwName, cfg.gwNamespace, cfg.sectionName)
+		if resolveErr != nil {
+			return ctrl.Result{}, r.setNotRegistered(ctx, binding, resolveErr.Error())
+		}
+	}
+
+	if err := r.reconcileHTTPRoute(ctx, binding, mcpServer, cfg.gwName, cfg.gwNamespace, routeHostname, cfg.sectionName, cfg.path); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -226,22 +231,19 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, statusErr
 	}
 
-	publicHost := cfg.hostname
-	if !cfg.hostnameExplicit {
-		var resolveErr error
-		publicHost, resolveErr = r.resolvePublicHostname(ctx, cfg.gwName, cfg.gwNamespace)
-		if resolveErr != nil {
-			statusErr := r.updateBindingStatus(ctx, binding, metav1.ConditionFalse,
-				mcpcontroller.ReasonGatewayNotRegistered, resolveErr.Error(), "")
-			return ctrl.Result{RequeueAfter: 10 * time.Second}, statusErr
-		}
+	ep, resolveErr := r.resolvePublicEndpoint(ctx, cfg)
+	if resolveErr != nil {
+		return ctrl.Result{}, r.updateBindingStatus(ctx, binding, metav1.ConditionFalse,
+			mcpcontroller.ReasonGatewayNotRegistered, resolveErr.Error(), "")
+	}
+	if ep == nil {
+		statusErr := r.updateBindingStatus(ctx, binding, metav1.ConditionFalse,
+			mcpcontroller.ReasonPublicAddressPending,
+			"Waiting for public address: no public-hostname in ConfigMap, no MCPGatewayExtension publicHost, and no public listener hostname available", "")
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, statusErr
 	}
 
-	scheme, schemeErr := providers.SchemeFromAcceptedRoute(ctx, r.Client, route, cfg.gwName, cfg.gwNamespace)
-	if schemeErr != nil {
-		return ctrl.Result{}, schemeErr
-	}
-	statusURL := fmt.Sprintf("%s://%s%s", scheme, publicHost, cfg.path)
+	statusURL := fmt.Sprintf("%s://%s%s", ep.scheme, providers.FormatHost(ep.host), cfg.path)
 
 	return ctrl.Result{}, r.updateBindingStatus(ctx, binding, metav1.ConditionTrue,
 		mcpcontroller.ReasonGatewayRegistered, "HTTPRoute accepted and MCPServerRegistration ready", statusURL)
@@ -448,11 +450,11 @@ func (r *Reconciler) resolveHostname(ctx context.Context, mcpServerName, gwName,
 			continue
 		}
 		if listener.Hostname == nil {
-			return "", fmt.Errorf("gateway listener %q has no hostname; set %q in the ConfigMap", sectionName, configKeyHostname)
+			return "", fmt.Errorf("gateway listener %q has no hostname; set %q in the ConfigMap", sectionName, configKeyRouteHostname)
 		}
 		h := string(*listener.Hostname)
 		if !strings.HasPrefix(h, "*.") {
-			return "", fmt.Errorf("gateway listener %q hostname %q is not a wildcard; set %q in the ConfigMap", sectionName, h, configKeyHostname)
+			return "", fmt.Errorf("gateway listener %q hostname %q is not a wildcard; set %q in the ConfigMap", sectionName, h, configKeyRouteHostname)
 		}
 		return mcpServerName + h[1:], nil
 	}
@@ -460,37 +462,133 @@ func (r *Reconciler) resolveHostname(ctx context.Context, mcpServerName, gwName,
 	return "", fmt.Errorf("gateway %s/%s has no listener named %q", gwNamespace, gwName, sectionName)
 }
 
-// resolvePublicHostname finds the MCPGatewayExtension targeting the given
-// Gateway and returns its publicHost. If zero or multiple extensions target the
-// Gateway, an error is returned asking the user to set hostname explicitly.
-func (r *Reconciler) resolvePublicHostname(ctx context.Context, gwName, gwNamespace string) (string, error) {
+// resolvePublicEndpoint determines the public host and scheme for the status URL.
+// Fallback chain: ConfigMap public-hostname → MCPGatewayExtension.publicHost →
+// public listener hostname.
+// Returns nil when no source provides a public hostname (caller should requeue).
+func (r *Reconciler) resolvePublicEndpoint(ctx context.Context, cfg *parsedConfig) (*publicEndpoint, error) {
+	if cfg.publicHostname != "" {
+		scheme, err := r.schemeFromListener(ctx, cfg.gwName, cfg.gwNamespace, cfg.sectionName)
+		if err != nil {
+			return nil, err
+		}
+		return &publicEndpoint{host: cfg.publicHostname, scheme: scheme}, nil
+	}
+
+	ext, err := r.findMCPGatewayExtension(ctx, cfg.gwName, cfg.gwNamespace)
+	if err != nil {
+		return nil, err
+	}
+
+	if ext != nil {
+		scheme := r.schemeFromExtension(ctx, cfg.gwName, cfg.gwNamespace, cfg.sectionName, ext)
+
+		if ext.Spec.PublicHost != "" {
+			return &publicEndpoint{host: ext.Spec.PublicHost, scheme: scheme}, nil
+		}
+
+		listenerHost := r.listenerHostname(ctx, cfg.gwName, cfg.gwNamespace, ext.Spec.TargetRef.SectionName)
+		if listenerHost != "" {
+			return &publicEndpoint{host: listenerHost, scheme: scheme}, nil
+		}
+	}
+
+	return nil, nil
+}
+
+// findMCPGatewayExtension finds the MCPGatewayExtension targeting the given
+// Gateway. It matches on Gateway identity only, ignoring sectionName — the
+// extension and the config may legitimately target different listeners (e.g.
+// public vs internal). When multiple extensions target the same Gateway, it
+// returns an error directing the user to set public-hostname explicitly.
+func (r *Reconciler) findMCPGatewayExtension(ctx context.Context, gwName, gwNamespace string) (*kuadrantapi.MCPGatewayExtension, error) {
 	extList := &kuadrantapi.MCPGatewayExtensionList{}
 	if err := r.List(ctx, extList); err != nil {
-		return "", fmt.Errorf("listing MCPGatewayExtensions: %w", err)
+		return nil, fmt.Errorf("listing MCPGatewayExtensions: %w", err)
 	}
 
 	var matches []kuadrantapi.MCPGatewayExtension
 	for _, ext := range extList.Items {
 		ref := ext.Spec.TargetRef
+		if ref.Group != "" && ref.Group != gatewayv1.GroupName {
+			continue
+		}
 		refNS := ref.Namespace
 		if refNS == "" {
 			refNS = ext.Namespace
 		}
-		if ref.Kind == "Gateway" && ref.Name == gwName && refNS == gwNamespace {
-			matches = append(matches, ext)
+		if ref.Kind != "Gateway" || ref.Name != gwName || refNS != gwNamespace {
+			continue
 		}
+		matches = append(matches, ext)
 	}
 
 	switch len(matches) {
 	case 0:
-		return "", fmt.Errorf("no MCPGatewayExtension targets gateway %s/%s; set %q in the ConfigMap to specify the public hostname", gwNamespace, gwName, configKeyHostname)
+		return nil, nil
 	case 1:
-		if matches[0].Spec.PublicHost == "" {
-			return "", fmt.Errorf("MCPGatewayExtension %s/%s has no publicHost; set %q in the ConfigMap", matches[0].Namespace, matches[0].Name, configKeyHostname)
-		}
-		return matches[0].Spec.PublicHost, nil
+		return &matches[0], nil
 	default:
-		return "", fmt.Errorf("multiple MCPGatewayExtensions target gateway %s/%s; set %q in the ConfigMap to specify the public hostname", gwNamespace, gwName, configKeyHostname)
+		return nil, fmt.Errorf("multiple MCPGatewayExtensions target gateway %s/%s; set %q in the ConfigMap to specify the public hostname", gwNamespace, gwName, configKeyPublicHostname)
+	}
+}
+
+func (r *Reconciler) schemeFromListener(ctx context.Context, gwName, gwNamespace, sectionName string) (string, error) {
+	gw := &gatewayv1.Gateway{}
+	if err := r.Get(ctx, client.ObjectKey{Name: gwName, Namespace: gwNamespace}, gw); err != nil {
+		if apierrors.IsNotFound(err) {
+			return providers.SchemeHTTP, nil
+		}
+		return "", fmt.Errorf("failed to get Gateway %s/%s: %w", gwNamespace, gwName, err)
+	}
+	for _, listener := range gw.Spec.Listeners {
+		if string(listener.Name) == sectionName {
+			return protocolToScheme(listener.Protocol), nil
+		}
+	}
+	return providers.SchemeHTTP, nil
+}
+
+func (r *Reconciler) schemeFromExtension(ctx context.Context, gwName, gwNamespace, configSectionName string, ext *kuadrantapi.MCPGatewayExtension) string {
+	sectionName := ext.Spec.TargetRef.SectionName
+	if sectionName == "" {
+		sectionName = configSectionName
+	}
+	if sectionName == "" {
+		return providers.SchemeHTTP
+	}
+	scheme, err := r.schemeFromListener(ctx, gwName, gwNamespace, sectionName)
+	if err != nil {
+		return providers.SchemeHTTP
+	}
+	return scheme
+}
+
+func (r *Reconciler) listenerHostname(ctx context.Context, gwName, gwNamespace, sectionName string) string {
+	if sectionName == "" {
+		return ""
+	}
+	gw := &gatewayv1.Gateway{}
+	if err := r.Get(ctx, client.ObjectKey{Name: gwName, Namespace: gwNamespace}, gw); err != nil {
+		return ""
+	}
+	for _, listener := range gw.Spec.Listeners {
+		if string(listener.Name) == sectionName && listener.Hostname != nil {
+			h := string(*listener.Hostname)
+			if !strings.HasPrefix(h, "*.") {
+				return h
+			}
+		}
+	}
+	return ""
+}
+
+func protocolToScheme(protocol gatewayv1.ProtocolType) string {
+	switch protocol {
+	case gatewayv1.HTTPSProtocolType, gatewayv1.TLSProtocolType:
+		return providers.SchemeHTTPS
+	default:
+		return providers.SchemeHTTP
 	}
 }
 

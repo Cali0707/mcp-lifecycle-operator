@@ -53,7 +53,8 @@ var providers = map[string]ProviderConfig{
 			"gateway-name":      "e2e-gateway",
 			"gateway-namespace": "gateway-system",
 			"gateway-class":     "eg",
-			"hostname":          "mcp.e2e.test",
+			"route-hostname":    "mcp.e2e.test",
+			"public-hostname":   "mcp.e2e.test",
 		},
 		GatewayService: GatewayServiceLocator{
 			Namespace: "envoy-gateway-system",
@@ -69,7 +70,8 @@ var providers = map[string]ProviderConfig{
 			"gateway-name":      "mcp-gateway",
 			"gateway-namespace": "gateway-system",
 			"gateway-class":     "istio",
-			"hostname":          "mcp.127-0-0-1.sslip.io",
+			"route-hostname":    "mcp.127-0-0-1.sslip.io",
+			"public-hostname":   "mcp.127-0-0-1.sslip.io",
 			"prefix":            "e2e_",
 		},
 		GatewayService: GatewayServiceLocator{

@@ -40,11 +40,12 @@ kubectl get mcpserver kubernetes-mcp-server -n default -o jsonpath='{.status.add
 
 Edit `gateway-config.yaml` to match your environment:
 
-| Key                 | Description                              |
-|---------------------|------------------------------------------|
-| `gateway-name`      | Name of your Gateway resource            |
-| `gateway-namespace` | Namespace where the Gateway lives        |
-| `hostname`          | Hostname for routing (optional)          |
+| Key                 | Description                                       |
+|---------------------|----------------------------------------------------|
+| `gateway-name`      | Name of your Gateway resource                      |
+| `gateway-namespace` | Namespace where the Gateway lives                  |
+| `route-hostname`    | Hostname to set on the HTTPRoute (optional)        |
+| `public-hostname`   | Public hostname for the status URL (optional)      |
 
 ## Cleanup
 

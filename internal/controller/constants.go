@@ -54,6 +54,7 @@ const (
 	ReasonGatewayRegistered      = "GatewayRegistered"
 	ReasonGatewayNotRegistered   = "GatewayNotRegistered"
 	ReasonGatewayBindingNotFound = "BindingNotFound"
+	ReasonPublicAddressPending   = "PublicAddressPending"
 )
 
 // MetricReasonReconcileError is the `reason` label on deployment/service failure counters

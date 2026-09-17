@@ -6,4 +6,4 @@ metadata:
 data:
   gateway-name: my-gateway
   gateway-namespace: gateway-system
-  hostname: mcp.example.com
+  route-hostname: mcp.example.com
