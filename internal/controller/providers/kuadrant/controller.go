@@ -475,7 +475,7 @@ func (r *Reconciler) resolvePublicEndpoint(ctx context.Context, cfg *parsedConfi
 		return &publicEndpoint{host: cfg.publicHostname, scheme: scheme}, nil
 	}
 
-	ext, err := r.findMCPGatewayExtension(ctx, cfg.gwName, cfg.gwNamespace)
+	ext, err := r.findMCPGatewayExtension(ctx, cfg.gwName, cfg.gwNamespace, cfg.sectionName)
 	if err != nil {
 		return nil, err
 	}
@@ -496,18 +496,20 @@ func (r *Reconciler) resolvePublicEndpoint(ctx context.Context, cfg *parsedConfi
 	return nil, nil
 }
 
-// findMCPGatewayExtension finds the MCPGatewayExtension targeting the given
-// Gateway. It matches on Gateway identity only, ignoring sectionName — the
-// extension and the config may legitimately target different listeners (e.g.
-// public vs internal). When multiple extensions target the same Gateway, it
-// returns an error directing the user to set public-hostname explicitly.
-func (r *Reconciler) findMCPGatewayExtension(ctx context.Context, gwName, gwNamespace string) (*kuadrantapi.MCPGatewayExtension, error) {
+// findMCPGatewayExtension finds the MCPGatewayExtension for the given Gateway
+// and config listener. It uses port-based matching: an extension qualifies when
+// its target listener shares the same port as the config's sectionName listener.
+// This mirrors how the Kuadrant mcp-gateway controller associates resources
+// with extensions via the Gateway's listener ports (see
+// httpRouteAttachesToListener in
+// github.com/Kuadrant/mcp-gateway/internal/controller/mcpgatewayextension.go).
+func (r *Reconciler) findMCPGatewayExtension(ctx context.Context, gwName, gwNamespace, sectionName string) (*kuadrantapi.MCPGatewayExtension, error) {
 	extList := &kuadrantapi.MCPGatewayExtensionList{}
 	if err := r.List(ctx, extList); err != nil {
 		return nil, fmt.Errorf("listing MCPGatewayExtensions: %w", err)
 	}
 
-	var matches []kuadrantapi.MCPGatewayExtension
+	var allForGateway []kuadrantapi.MCPGatewayExtension
 	for _, ext := range extList.Items {
 		ref := ext.Spec.TargetRef
 		if ref.Group != "" && ref.Group != gatewayv1.GroupName {
@@ -520,7 +522,16 @@ func (r *Reconciler) findMCPGatewayExtension(ctx context.Context, gwName, gwName
 		if ref.Kind != "Gateway" || ref.Name != gwName || refNS != gwNamespace {
 			continue
 		}
-		matches = append(matches, ext)
+		allForGateway = append(allForGateway, ext)
+	}
+
+	if len(allForGateway) == 0 {
+		return nil, nil
+	}
+
+	matches, err := r.filterExtensionsByPort(ctx, gwName, gwNamespace, sectionName, allForGateway)
+	if err != nil {
+		return nil, err
 	}
 
 	switch len(matches) {
@@ -529,8 +540,54 @@ func (r *Reconciler) findMCPGatewayExtension(ctx context.Context, gwName, gwName
 	case 1:
 		return &matches[0], nil
 	default:
-		return nil, fmt.Errorf("multiple MCPGatewayExtensions target gateway %s/%s; set %q in the ConfigMap to specify the public hostname", gwNamespace, gwName, configKeyPublicHostname)
+		return nil, fmt.Errorf("multiple MCPGatewayExtensions target gateway %s/%s on the same port; set %q in the ConfigMap to specify the public hostname", gwNamespace, gwName, configKeyPublicHostname)
 	}
+}
+
+// filterExtensionsByPort returns extensions whose target listener shares the
+// same port as the given sectionName listener on the Gateway.
+func (r *Reconciler) filterExtensionsByPort(ctx context.Context, gwName, gwNamespace, sectionName string, extensions []kuadrantapi.MCPGatewayExtension) ([]kuadrantapi.MCPGatewayExtension, error) {
+	gw := &gatewayv1.Gateway{}
+	if err := r.Get(ctx, client.ObjectKey{Name: gwName, Namespace: gwNamespace}, gw); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, fmt.Errorf("gateway %s/%s not found", gwNamespace, gwName)
+		}
+		return nil, fmt.Errorf("failed to get Gateway %s/%s: %w", gwNamespace, gwName, err)
+	}
+
+	configPort, ok := listenerPort(gw, sectionName)
+	if !ok {
+		return nil, nil
+	}
+
+	samePortListeners := listenerNamesByPort(gw, configPort)
+
+	var matches []kuadrantapi.MCPGatewayExtension
+	for _, ext := range extensions {
+		if samePortListeners[ext.Spec.TargetRef.SectionName] {
+			matches = append(matches, ext)
+		}
+	}
+	return matches, nil
+}
+
+func listenerPort(gw *gatewayv1.Gateway, sectionName string) (gatewayv1.PortNumber, bool) {
+	for _, l := range gw.Spec.Listeners {
+		if string(l.Name) == sectionName {
+			return l.Port, true
+		}
+	}
+	return 0, false
+}
+
+func listenerNamesByPort(gw *gatewayv1.Gateway, port gatewayv1.PortNumber) map[string]bool {
+	names := make(map[string]bool)
+	for _, l := range gw.Spec.Listeners {
+		if l.Port == port {
+			names[string(l.Name)] = true
+		}
+	}
+	return names
 }
 
 func (r *Reconciler) schemeFromListener(ctx context.Context, gwName, gwNamespace, sectionName string) (string, error) {

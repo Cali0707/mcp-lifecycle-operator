@@ -903,7 +903,7 @@ var _ = Describe("Kuadrant Provider Controller", func() {
 		Expect(registered.Message).To(ContainSubstring("multiple MCPGatewayExtensions"))
 	})
 
-	It("should error when multiple MCPGatewayExtensions target the same gateway on different sectionNames", func() {
+	It("should filter out extension on a different port", func() {
 		createMCPServer()
 
 		gw := &gatewayv1.Gateway{
@@ -920,6 +920,11 @@ var _ = Describe("Kuadrant Provider Controller", func() {
 						Protocol: gatewayv1.HTTPProtocolType,
 						Hostname: hostnamePtr("*.mcp.local"),
 					},
+					{
+						Name:     "admin",
+						Port:     8443,
+						Protocol: gatewayv1.HTTPSProtocolType,
+					},
 				},
 			},
 		}
@@ -929,25 +934,25 @@ var _ = Describe("Kuadrant Provider Controller", func() {
 
 		createGatewayExtension("mcps.example.com")
 
-		extOther := &kuadrantapi.MCPGatewayExtension{
+		extAdmin := &kuadrantapi.MCPGatewayExtension{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "other-extension",
+				Name:      "admin-extension",
 				Namespace: "gateway-ns",
 			},
 			Spec: kuadrantapi.MCPGatewayExtensionSpec{
-				PublicHost: "other.example.com",
+				PublicHost: "admin.example.com",
 				TargetRef: kuadrantapi.TargetReference{
 					Group:       "gateway.networking.k8s.io",
 					Kind:        "Gateway",
 					Name:        "my-gateway",
 					Namespace:   "gateway-ns",
-					SectionName: "other-listener",
+					SectionName: "admin",
 				},
 			},
 		}
-		extOther.SetGroupVersionKind(kuadrantapi.SchemeGroupVersion.WithKind("MCPGatewayExtension"))
-		Expect(k8sClient.Create(ctx, extOther)).To(Succeed())
-		defer func() { _ = k8sClient.Delete(ctx, extOther) }()
+		extAdmin.SetGroupVersionKind(kuadrantapi.SchemeGroupVersion.WithKind("MCPGatewayExtension"))
+		Expect(k8sClient.Create(ctx, extAdmin)).To(Succeed())
+		defer func() { _ = k8sClient.Delete(ctx, extAdmin) }()
 
 		createConfigMap(map[string]string{
 			configKeyGatewayName:      "my-gateway",
@@ -971,9 +976,8 @@ var _ = Describe("Kuadrant Provider Controller", func() {
 		Expect(k8sClient.Get(ctx, client.ObjectKey{Name: bindingName, Namespace: testNamespace}, binding)).To(Succeed())
 		registered := meta.FindStatusCondition(binding.Status.Conditions, mcpcontroller.ConditionTypeRegistered)
 		Expect(registered).NotTo(BeNil())
-		Expect(registered.Status).To(Equal(metav1.ConditionFalse))
-		Expect(registered.Reason).To(Equal(mcpcontroller.ReasonGatewayNotRegistered))
-		Expect(registered.Message).To(ContainSubstring("multiple MCPGatewayExtensions"))
+		Expect(registered.Status).To(Equal(metav1.ConditionTrue))
+		Expect(binding.Status.URL).To(Equal("http://mcps.example.com/mcp"))
 	})
 
 	It("should use extension on gateway when its sectionName differs from config", func() {

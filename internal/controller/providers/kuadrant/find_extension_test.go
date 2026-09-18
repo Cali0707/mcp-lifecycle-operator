@@ -24,26 +24,29 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	kuadrantapi "github.com/kubernetes-sigs/mcp-lifecycle-operator/internal/controller/providers/kuadrant/api"
 )
 
-// These specs exercise the Gateway-identity matching in findMCPGatewayExtension
-// with a controller-runtime fake client. Their focus is the targetRef filter
-// branches that the envtest suite in controller_test.go does not vary: a
-// non-empty non-Gateway group, an empty and a non-Gateway kind, and the
-// namespace-defaulting fallback (refNS == "" -> ext.Namespace). The testdata CRD
-// requires only name and sectionName on targetRef, so group, kind, and namespace
-// are optional and cheapest to vary here. These branches decide whether an
-// extension counts as targeting the Gateway at all.
+// These specs exercise findMCPGatewayExtension with a controller-runtime fake
+// client. The function first filters extensions by Gateway identity (group,
+// kind, name, namespace) and then by port-based matching (the extension's
+// target listener must share the same port as the config's sectionName
+// listener). These tests focus on the identity filter branches that the envtest
+// suite does not vary: a non-empty non-Gateway group, an empty and a
+// non-Gateway kind, and the namespace-defaulting fallback (refNS == "" ->
+// ext.Namespace). The port-based filtering is exercised by the envtest tests
+// in controller_test.go which create Gateways with multiple listeners.
 //
 // The 0/1/>1 outcomes are also pinned directly: they are cheap to assert without
 // envtest, and the "sole match survives coexisting non-matching extensions" case
 // is what proves the filter selects rather than merely counts.
 var _ = Describe("findMCPGatewayExtension", func() {
 	// ext builds an MCPGatewayExtension whose targetRef points at my-gateway in
-	// gateway-ns by default. group, kind, and refNS override the corresponding
-	// targetRef fields so individual specs can probe the filter branches.
+	// gateway-ns with sectionName "mcps" (matching the Gateway listener created
+	// in find). group, kind, and refNS override the corresponding targetRef
+	// fields so individual specs can probe the identity filter branches.
 	ext := func(name, group, kind, refNS, publicHost string) *kuadrantapi.MCPGatewayExtension {
 		return &kuadrantapi.MCPGatewayExtension{
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "gateway-ns"},
@@ -63,12 +66,24 @@ var _ = Describe("findMCPGatewayExtension", func() {
 	find := func(exts ...*kuadrantapi.MCPGatewayExtension) (*kuadrantapi.MCPGatewayExtension, error) {
 		scheme := runtime.NewScheme()
 		Expect(kuadrantapi.AddToScheme(scheme)).To(Succeed())
-		builder := fake.NewClientBuilder().WithScheme(scheme)
+		Expect(gatewayv1.Install(scheme)).To(Succeed())
+		gw := &gatewayv1.Gateway{
+			ObjectMeta: metav1.ObjectMeta{Name: "my-gateway", Namespace: "gateway-ns"},
+			Spec: gatewayv1.GatewaySpec{
+				GatewayClassName: "test",
+				Listeners: []gatewayv1.Listener{{
+					Name:     "mcps",
+					Port:     80,
+					Protocol: gatewayv1.HTTPProtocolType,
+				}},
+			},
+		}
+		builder := fake.NewClientBuilder().WithScheme(scheme).WithObjects(gw)
 		for _, e := range exts {
 			builder = builder.WithObjects(e)
 		}
 		r := &Reconciler{Client: builder.Build(), Scheme: scheme}
-		return r.findMCPGatewayExtension(context.Background(), "my-gateway", "gateway-ns")
+		return r.findMCPGatewayExtension(context.Background(), "my-gateway", "gateway-ns", "mcps")
 	}
 
 	DescribeTable("selects the single extension that targets the gateway",
